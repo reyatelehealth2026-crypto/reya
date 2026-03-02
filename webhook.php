@@ -3368,8 +3368,19 @@ function checkUserConsent($db, $userId, $lineUserId = null)
  */
 function getOrCreateUser($db, $line, $userId, $lineAccountId = null, $groupId = null)
 {
+    $hasCustomDisplayName = false;
+    try {
+        $columnStmt = $db->query("SHOW COLUMNS FROM users LIKE 'custom_display_name'");
+        $hasCustomDisplayName = $columnStmt && $columnStmt->rowCount() > 0;
+    } catch (Exception $e) {
+        logWebhookException($db, 'webhook.php', $e);
+    }
+
     // ตรวจสอบว่ามีผู้ใช้อยู่แล้วหรือไม่
-    $stmt = $db->prepare("SELECT id, display_name, custom_display_name, picture_url, line_account_id FROM users WHERE line_user_id = ?");
+    $userSelectFields = $hasCustomDisplayName
+        ? "id, display_name, custom_display_name, picture_url, line_account_id"
+        : "id, display_name, '' AS custom_display_name, picture_url, line_account_id";
+    $stmt = $db->prepare("SELECT {$userSelectFields} FROM users WHERE line_user_id = ?");
     $stmt->execute([$userId]);
     $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -3408,6 +3419,7 @@ function getOrCreateUser($db, $line, $userId, $lineAccountId = null, $groupId = 
             $user = [
                 'id' => $db->lastInsertId(),
                 'display_name' => $displayName,
+                'custom_display_name' => '',
                 'picture_url' => $pictureUrl,
                 'line_account_id' => $lineAccountId
             ];
@@ -3421,7 +3433,7 @@ function getOrCreateUser($db, $line, $userId, $lineAccountId = null, $groupId = 
             logWebhookException($db, 'webhook.php', $e);
             error_log("getOrCreateUser insert error: " . $e->getMessage());
             // ลองดึงอีกครั้ง (อาจมี race condition)
-            $stmt = $db->prepare("SELECT id, display_name, picture_url, line_account_id FROM users WHERE line_user_id = ?");
+            $stmt = $db->prepare("SELECT {$userSelectFields} FROM users WHERE line_user_id = ?");
             $stmt->execute([$userId]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
         }

@@ -117,8 +117,8 @@ try {
 
     // Count members per tier by calculating from points
     $tierCounts = [];
-    foreach ($allTiers as $tier) {
-        $tierCounts[$tier['tier_code']] = 0;
+    foreach ($allTiers as $tierItem) {
+        $tierCounts[$tierItem['tier_code']] = 0;
     }
 
     if ($hasPoints) {
@@ -143,11 +143,11 @@ try {
         <p class="text-gray-500 text-sm">สมาชิกทั้งหมด</p>
         <p class="text-2xl font-bold text-gray-800"><?= number_format($total) ?></p>
     </div>
-    <?php foreach ($allTiers as $tier):
-        $tierCode = $tier['tier_code'];
-        $tierName = $tier['tier_name'];
-        $tierColor = $tier['color'] ?? '#6B7280';
-        $tierIcon = $tier['icon'] ?? '🏅';
+    <?php foreach ($allTiers as $tierItem):
+        $tierCode = $tierItem['tier_code'];
+        $tierName = $tierItem['tier_name'];
+        $tierColor = $tierItem['color'] ?? '#6B7280';
+        $tierIcon = $tierItem['icon'] ?? '🏅';
         $count = $tierCounts[$tierCode] ?? 0;
         ?>
         <div class="rounded-xl shadow p-4 text-white"
