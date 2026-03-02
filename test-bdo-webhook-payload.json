@@ -1,0 +1,40 @@
+{
+    "event": "bdo.confirmed",
+    "timestamp": "2026-02-03T08:47:23+07:00",
+    "data": {
+        "bdo_ref": "BDO-2026-TEST-001",
+        "order_ref": "SO-2026-TEST-001",
+        "order_id": 99999,
+        "amount_total": 15750.5,
+        "due_date": "2026-02-10",
+        "customer": {
+            "partner_id": 100,
+            "name": "คุณสมชาย ใจดี",
+            "phone": "081-234-5678"
+        },
+        "salesperson": {
+            "partner_id": 200,
+            "name": "คุณสมหญิง เซลล์ดี"
+        },
+        "payment": {
+            "promptpay": {
+                "qr_data": {
+                    "raw_payload": "00020101021129370016A000000677010111011300668123456785802TH5303764540615750.506304ABCD"
+                }
+            }
+        },
+        "invoice": {
+            "pdf_url": "https:\/\/erp.cnyrxapp.com\/invoices\/INV-2026-TEST-001.pdf"
+        },
+        "bank_account": {
+            "bank_name": "ธนาคารกสิกรไทย",
+            "account_number": "123-4-56789-0",
+            "account_name": "บริษัท ซีเอ็นวาย จำกัด"
+        }
+    },
+    "notify": {
+        "customer": true,
+        "salesperson": true
+    },
+    "message_template": []
+}

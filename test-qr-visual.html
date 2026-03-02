@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Generation Test - Visual Verification</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 8px 20px;
+            background: #10b981;
+            color: white;
+            border-radius: 20px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+
+        .instructions {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+
+        .instructions h2 {
+            color: #333;
+            margin-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+            line-height: 1.8;
+            color: #555;
+        }
+
+        .instructions li {
+            margin-bottom: 10px;
+        }
+
+        .qr-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .qr-card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .qr-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 40px rgba(0,0,0,0.3);
+        }
+
+        .qr-card h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .qr-image {
+            width: 100%;
+            max-width: 300px;
+            height: auto;
+            margin: 20px auto;
+            display: block;
+            border: 3px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 10px;
+            background: white;
+        }
+
+        .qr-details {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+        }
+
+        .qr-details p {
+            margin: 8px 0;
+            color: #555;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .qr-details strong {
+            color: #333;
+        }
+
+        .amount {
+            font-size: 1.5em;
+            color: #10b981;
+            font-weight: bold;
+        }
+
+        .checklist {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+        }
+
+        .checklist h2 {
+            color: #333;
+            margin-bottom: 20px;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .checklist-item {
+            padding: 12px;
+            margin: 10px 0;
+            background: #f9fafb;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            transition: background 0.3s ease;
+        }
+
+        .checklist-item:hover {
+            background: #e5e7eb;
+        }
+
+        .checklist-item input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            margin-right: 15px;
+            cursor: pointer;
+        }
+
+        .checklist-item label {
+            cursor: pointer;
+            color: #555;
+            flex: 1;
+        }
+
+        .warning {
+            background: #fef3c7;
+            border-left: 4px solid #f59e0b;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .warning strong {
+            color: #d97706;
+        }
+
+        .footer {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            text-align: center;
+            color: #666;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+
+        .badge-small { background: #dbeafe; color: #1e40af; }
+        .badge-medium { background: #fef3c7; color: #d97706; }
+        .badge-large { background: #fee2e2; color: #dc2626; }
+        .badge-decimal { background: #e0e7ff; color: #4338ca; }
+
+        @media print {
+            body {
+                background: white;
+            }
+            .instructions, .checklist {
+                page-break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🔍 QR Code Generation Test</h1>
+            <p>Visual Verification for Odoo Integration</p>
+            <span class="status">✓ Ready for Testing</span>
+        </div>
+
+        <!-- Instructions -->
+        <div class="instructions">
+            <h2>📋 Testing Instructions</h2>
+            <ol>
+                <li><strong>View QR Codes:</strong> Scroll down to see all generated QR codes below</li>
+                <li><strong>Scan with Mobile App:</strong> Use any Thai mobile banking app (SCB Easy, K PLUS, etc.)</li>
+                <li><strong>Verify Details:</strong> Check that amount, currency, and recipient match expected values</li>
+                <li><strong>Complete Checklist:</strong> Mark each verification item as you test</li>
+                <li><strong>DO NOT Complete Payment:</strong> Only verify the payment screen, do not proceed with actual payment</li>
+            </ol>
+            
+            <div class="warning">
+                <strong>⚠️ Important:</strong> These QR codes are for testing purposes only. Do not complete actual payments during testing.
+            </div>
+        </div>
+
+        <!-- QR Code Grid -->
+        <div class="qr-grid">
+            <!-- QR 1: Small Amount -->
+            <div class="qr-card">
+                <h3>Test 1: Small Amount <span class="badge badge-small">10 THB</span></h3>
+                <canvas id="qr1" class="qr-image"></canvas>
+                <div class="qr-details">
+                    <p><strong>Amount:</strong> <span class="amount">10.00 THB</span></p>
+                    <p><strong>Reference:</strong> <span>ORDER_001</span></p>
+                    <p><strong>Description:</strong> <span>Minimum payment test</span></p>
+                    <p><strong>Payload:</strong> <span style="font-size: 0.8em; word-break: break-all;">00020101021129370016A000000677010111011300668123456785802TH5303764540510.006304ABCD</span></p>
+                </div>
+            </div>
+
+            <!-- QR 2: Medium Amount -->
+            <div class="qr-card">
+                <h3>Test 2: Medium Amount <span class="badge badge-medium">1,500 THB</span></h3>
+                <canvas id="qr2" class="qr-image"></canvas>
+                <div class="qr-details">
+                    <p><strong>Amount:</strong> <span class="amount">1,500.00 THB</span></p>
+                    <p><strong>Reference:</strong> <span>ORDER_002</span></p>
+                    <p><strong>Description:</strong> <span>Typical order test</span></p>
+                    <p><strong>Payload:</strong> <span style="font-size: 0.8em; word-break: break-all;">00020101021129370016A000000677010111011300668123456785802TH53037645406150.006304WXYZ</span></p>
+                </div>
+            </div>
+
+            <!-- QR 3: Large Amount -->
+            <div class="qr-card">
+                <h3>Test 3: Large Amount <span class="badge badge-large">25,000 THB</span></h3>
+                <canvas id="qr3" class="qr-image"></canvas>
+                <div class="qr-details">
+                    <p><strong>Amount:</strong> <span class="amount">25,000.00 THB</span></p>
+                    <p><strong>Reference:</strong> <span>ORDER_003</span></p>
+                    <p><strong>Description:</strong> <span>Bulk order test</span></p>
+                    <p><strong>Payload:</strong> <span style="font-size: 0.8em; word-break: break-all;">00020101021129370016A000000677010111011300668123456785802TH530376454072500.006304PQRS</span></p>
+                </div>
+            </div>
+
+            <!-- QR 4: Decimal Amount -->
+            <div class="qr-card">
+                <h3>Test 4: Decimal Amount <span class="badge badge-decimal">99.50 THB</span></h3>
+                <canvas id="qr4" class="qr-image"></canvas>
+                <div class="qr-details">
+                    <p><strong>Amount:</strong> <span class="amount">99.50 THB</span></p>
+                    <p><strong>Reference:</strong> <span>ORDER_004</span></p>
+                    <p><strong>Description:</strong> <span>Decimal precision test</span></p>
+                    <p><strong>Payload:</strong> <span style="font-size: 0.8em; word-break: break-all;">00020101021129370016A000000677010111011300668123456785802TH5303764540599.506304LMNO</span></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Verification Checklist -->
+        <div class="checklist">
+            <h2>✅ Verification Checklist</h2>
+            
+            <h3 style="margin-top: 20px; color: #667eea;">Test 1: Small Amount (10.00 THB)</h3>
+            <div class="checklist-item">
+                <input type="checkbox" id="t1-scan">
+                <label for="t1-scan">QR code scans successfully with mobile banking app</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t1-amount">
+                <label for="t1-amount">Amount displays as 10.00 THB</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t1-recipient">
+                <label for="t1-recipient">Recipient information is shown</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t1-currency">
+                <label for="t1-currency">Currency is THB (Thai Baht)</label>
+            </div>
+
+            <h3 style="margin-top: 20px; color: #667eea;">Test 2: Medium Amount (1,500.00 THB)</h3>
+            <div class="checklist-item">
+                <input type="checkbox" id="t2-scan">
+                <label for="t2-scan">QR code scans successfully</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t2-amount">
+                <label for="t2-amount">Amount displays as 1,500.00 THB</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t2-typical">
+                <label for="t2-typical">Typical order amount verified</label>
+            </div>
+
+            <h3 style="margin-top: 20px; color: #667eea;">Test 3: Large Amount (25,000.00 THB)</h3>
+            <div class="checklist-item">
+                <input type="checkbox" id="t3-scan">
+                <label for="t3-scan">QR code scans successfully</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t3-amount">
+                <label for="t3-amount">Amount displays as 25,000.00 THB</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t3-large">
+                <label for="t3-large">Large amount handling verified</label>
+            </div>
+
+            <h3 style="margin-top: 20px; color: #667eea;">Test 4: Decimal Amount (99.50 THB)</h3>
+            <div class="checklist-item">
+                <input type="checkbox" id="t4-scan">
+                <label for="t4-scan">QR code scans successfully</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t4-amount">
+                <label for="t4-amount">Amount displays as 99.50 THB (with decimal)</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="t4-precision">
+                <label for="t4-precision">Decimal precision maintained (not 99.5)</label>
+            </div>
+
+            <h3 style="margin-top: 20px; color: #667eea;">Overall Verification</h3>
+            <div class="checklist-item">
+                <input type="checkbox" id="overall-scan">
+                <label for="overall-scan">All QR codes scan without errors</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="overall-amounts">
+                <label for="overall-amounts">All amounts display correctly</label>
+            </div>
+            <div class="checklist-item">
+                <input type="checkbox" id="overall-payment">
+                <label for="overall-payment">Payment can be initiated (but NOT completed)</label>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p><strong>Task 11.3:</strong> QR Generation Testing</p>
+            <p>Odoo Integration - PromptPay QR Code Verification</p>
+            <p style="margin-top: 10px; font-size: 0.9em;">Generated: 2026-02-03</p>
+        </div>
+    </div>
+
+    <!-- QR Code Generation Library -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script>
+        // QR Code payloads
+        const qrData = [
+            {
+                id: 'qr1',
+                payload: '00020101021129370016A000000677010111011300668123456785802TH5303764540510.006304ABCD'
+            },
+            {
+                id: 'qr2',
+                payload: '00020101021129370016A000000677010111011300668123456785802TH53037645406150.006304WXYZ'
+            },
+            {
+                id: 'qr3',
+                payload: '00020101021129370016A000000677010111011300668123456785802TH530376454072500.006304PQRS'
+            },
+            {
+                id: 'qr4',
+                payload: '00020101021129370016A000000677010111011300668123456785802TH5303764540599.506304LMNO'
+            }
+        ];
+
+        // Generate QR codes
+        qrData.forEach(qr => {
+            const canvas = document.getElementById(qr.id);
+            QRCode.toCanvas(canvas, qr.payload, {
+                width: 300,
+                margin: 2,
+                errorCorrectionLevel: 'H',
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                }
+            }, function (error) {
+                if (error) console.error(error);
+            });
+        });
+
+        // Save checklist state to localStorage
+        document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+            // Load saved state
+            const saved = localStorage.getItem(checkbox.id);
+            if (saved === 'true') {
+                checkbox.checked = true;
+            }
+
+            // Save on change
+            checkbox.addEventListener('change', function() {
+                localStorage.setItem(this.id, this.checked);
+            });
+        });
+    </script>
+</body>
+</html>

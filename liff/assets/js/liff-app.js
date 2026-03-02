@@ -1,0 +1,11779 @@
+/**
+ * LIFF Application Main Controller
+ * Handles LIFF initialization, authentication, and app lifecycle
+ * 
+ * Requirements: 1.2, 1.6
+ * - Authenticate LINE_User and retrieve profile automatically
+ * - Display user-friendly error message with retry option on network failure
+ */
+
+class LiffApp {
+    constructor() {
+        this.isInitialized = false;
+        this.isLoggedIn = false;
+        this.isInClient = false;
+        this.profile = null;
+        this.config = window.APP_CONFIG || {};
+        this.config.ORDER_DATA_SOURCE = ((this.config.ORDER_DATA_SOURCE || 'shop') + '').toLowerCase() === 'odoo'
+            ? 'odoo'
+            : 'shop';
+    }
+
+    /**
+     * Initialize the LIFF application
+     */
+    async init() {
+        console.log('🚀 LiffApp initializing...');
+
+        // Initialize store with config
+        if (window.store) {
+            window.store.init({
+                baseUrl: this.config.BASE_URL,
+                liffId: this.config.LIFF_ID,
+                accountId: this.config.ACCOUNT_ID,
+                shopName: this.config.SHOP_NAME,
+                shopLogo: this.config.SHOP_LOGO,
+                companyName: this.config.COMPANY_NAME
+            });
+        }
+
+        try {
+            // Show app FIRST (so elements are visible for router)
+            this.showApp();
+
+            // Initialize LIFF SDK
+            await this.initLiff();
+
+            // Wait for DOM to update after showApp
+            await new Promise(resolve => requestAnimationFrame(resolve));
+
+            // Initialize router (needs app-content to be visible)
+            this.initRouter();
+
+            // Setup event listeners
+            this.setupEventListeners();
+
+            // Check and show onboarding for first-time visitors
+            this.checkAndShowOnboarding();
+
+            console.log('✅ LiffApp initialized successfully');
+
+        } catch (error) {
+            console.error('❌ LiffApp initialization failed:', error);
+            this.showError(error);
+        }
+    }
+
+    /**
+     * Get current order data source mode
+     */
+    getOrderDataSource() {
+        return this.config.ORDER_DATA_SOURCE === 'odoo' ? 'odoo' : 'shop';
+    }
+
+    /**
+     * Check whether orders should use Odoo flow
+     */
+    isOdooOrderSource() {
+        return this.getOrderDataSource() === 'odoo';
+    }
+
+    /**
+     * Initialize LIFF SDK
+     */
+    async initLiff() {
+        const liffId = this.config.LIFF_ID;
+
+        if (!liffId) {
+            console.warn('⚠️ No LIFF ID configured, running in guest mode');
+            this.handleGuestMode();
+            return;
+        }
+
+        try {
+            console.log('📱 Initializing LIFF with ID:', liffId);
+            await liff.init({ liffId });
+
+            this.isInitialized = true;
+            this.isInClient = liff.isInClient();
+
+            console.log('📱 LIFF initialized:', {
+                isLoggedIn: liff.isLoggedIn(),
+                isInClient: this.isInClient,
+                os: liff.getOS()
+            });
+
+            // Update store
+            if (window.store) {
+                window.store.set('isInClient', this.isInClient);
+            }
+
+            // Handle authentication
+            if (liff.isLoggedIn()) {
+                await this.handleLoggedIn();
+            } else {
+                this.handleNotLoggedIn();
+            }
+
+        } catch (error) {
+            console.error('❌ LIFF init error:', error);
+            // Don't throw - continue in guest mode instead
+            console.warn('⚠️ Continuing in guest mode due to LIFF error');
+            this.handleGuestMode();
+        }
+    }
+
+    /**
+     * Handle logged in user
+     */
+    async handleLoggedIn() {
+        try {
+            // Get user profile
+            this.profile = await liff.getProfile();
+            this.isLoggedIn = true;
+
+            console.log('👤 User profile:', this.profile.displayName);
+
+            // Update store
+            if (window.store) {
+                window.store.setProfile(this.profile);
+            }
+
+            // Load member data
+            await this.loadMemberData();
+
+        } catch (error) {
+            console.error('❌ Error getting profile:', error);
+            // Continue without profile
+            this.handleGuestMode();
+        }
+    }
+
+    /**
+     * Handle not logged in state
+     */
+    handleNotLoggedIn() {
+        console.log('👤 User not logged in');
+
+        // If in LINE app, auto login
+        if (this.isInClient) {
+            console.log('📱 In LINE app, triggering login...');
+            liff.login();
+            return;
+        }
+
+        // In external browser, show guest mode
+        this.handleGuestMode();
+    }
+
+    /**
+     * Handle guest mode (not logged in)
+     */
+    handleGuestMode() {
+        console.log('👤 Running in guest mode');
+        this.isLoggedIn = false;
+
+        if (window.store) {
+            window.store.set('isLoggedIn', false);
+        }
+    }
+
+    /**
+     * Load member data from API - Auto-register on first check
+     */
+    async loadMemberData() {
+        if (!this.profile?.userId) return;
+
+        try {
+            // First, call check API to auto-register if needed
+            const displayName = encodeURIComponent(this.profile.displayName || '');
+            const pictureUrl = encodeURIComponent(this.profile.pictureUrl || '');
+
+            const checkUrl = `${this.config.BASE_URL}/api/member.php?action=check&line_user_id=${this.profile.userId}&line_account_id=${this.config.ACCOUNT_ID}&display_name=${displayName}&picture_url=${pictureUrl}`;
+
+            const checkResponse = await this.fetchWithRetry(checkUrl);
+            const checkData = await checkResponse.json();
+
+            if (checkData.success && checkData.is_registered) {
+                console.log('✅ User is registered, loading member card...');
+
+                // Check if this was an auto-registration (new member)
+                const isNewMember = checkData.auto_registered === true;
+
+                // Now load full member card data
+                const cardUrl = `${this.config.BASE_URL}/api/member.php?action=get_card&line_user_id=${this.profile.userId}&line_account_id=${this.config.ACCOUNT_ID}`;
+                const cardResponse = await this.fetchWithRetry(cardUrl);
+                const cardData = await cardResponse.json();
+
+                if (cardData.success && cardData.member) {
+                    console.log('💳 Member data loaded:', cardData.member.member_id);
+                    if (window.store) {
+                        window.store.setMemberData(cardData);
+                    }
+
+                    // Show welcome modal for newly auto-registered members
+                    if (isNewMember) {
+                        console.log('🎉 New member detected, showing welcome modal...');
+                        // Delay to let the page render first
+                        setTimeout(() => {
+                            this.showWelcomeModal(
+                                cardData.member.display_name || cardData.member.first_name || this.profile.displayName,
+                                checkData.points || 50
+                            );
+                        }, 1500);
+                    }
+                }
+            } else {
+                console.log('📝 Check response:', checkData);
+            }
+
+        } catch (error) {
+            console.error('❌ Error loading member data:', error);
+            // Continue without member data
+        }
+    }
+
+
+    /**
+     * Initialize router
+     */
+    initRouter() {
+        if (!window.router) {
+            console.error('Router not found');
+            return;
+        }
+
+        // Get app-content element - it exists in DOM but may be hidden
+        let contentEl = document.getElementById('app-content');
+
+        // If not found, check if app element exists and try to find content inside
+        if (!contentEl) {
+            const app = document.getElementById('app');
+            if (app) {
+                contentEl = app.querySelector('#app-content') || app.querySelector('.app-content');
+            }
+        }
+
+        // Still not found - create it
+        if (!contentEl) {
+            console.warn('Content element not found, creating...');
+            const app = document.getElementById('app');
+            if (app) {
+                contentEl = document.createElement('main');
+                contentEl.id = 'app-content';
+                contentEl.className = 'app-content';
+                const header = app.querySelector('#app-header');
+                if (header && header.nextSibling) {
+                    app.insertBefore(contentEl, header.nextSibling);
+                } else {
+                    app.appendChild(contentEl);
+                }
+            } else {
+                console.error('App element not found');
+                return;
+            }
+        }
+
+        // Register page handlers
+        this.registerPageHandlers();
+
+        // Set route change callback
+        window.router.onRouteChange = (route, params) => {
+            this.onRouteChange(route, params);
+        };
+
+        // Initialize router
+        window.router.init(contentEl);
+
+        // Navigate to initial page if specified
+        const initialPage = this.config.INITIAL_PAGE;
+        if (initialPage && initialPage !== 'home') {
+            window.router.navigate(`/${initialPage}`, {}, true);
+        }
+    }
+
+    /**
+     * Register page handlers for router
+     */
+    registerPageHandlers() {
+        // Home page
+        window.router.register('home', () => this.renderHomePage());
+
+        // Shop page
+        window.router.register('shop', () => this.renderShopPage());
+
+        // Cart page
+        window.router.register('cart', () => this.renderCartPage());
+
+        // Checkout page
+        window.router.register('checkout', () => this.renderCheckoutPage());
+
+        // Orders page (switch source by mode)
+        window.router.register('orders', () => this.isOdooOrderSource() ? this.renderOdooOrdersPage() : this.renderOrdersPage());
+
+        // Profile page
+        window.router.register('profile', () => this.renderProfilePage());
+
+        // Member card page
+        window.router.register('member', () => this.renderMemberPage());
+
+        // Order detail page - Requirements: 19.1, 19.2, 19.3, 19.4
+        // In Odoo mode, force detail to use Odoo endpoint/page.
+        window.router.register('order-detail', (params) => this.isOdooOrderSource() ? this.renderOdooOrderDetailPage(params) : this.renderOrderDetailPage(params));
+
+        // Video call page - Requirements: 6.2, 6.3
+        window.router.register('video-call', (params) => this.renderVideoCallPage(params));
+
+        // Wishlist page - Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
+        window.router.register('wishlist', () => this.renderWishlistPage());
+
+        // Notification settings page - Requirements: 14.1, 14.2, 14.3
+        window.router.register('notifications', () => this.renderNotificationSettingsPage());
+
+        // Medication reminders page - Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7
+        window.router.register('medication-reminders', () => this.renderMedicationRemindersPage());
+
+        // AI Assistant page - Requirements: 7.1, 7.2
+        window.router.register('ai-assistant', (params) => this.renderAIAssistantPage(params));
+
+        // Health Profile page - Requirements: 18.1, 18.2, 18.3, 18.4, 18.5, 18.6, 18.7, 18.10
+        window.router.register('health-profile', () => this.renderHealthProfilePage());
+
+        // Product Detail page
+        window.router.register('product-detail', (params) => this.renderProductDetailPage(params));
+
+        // Appointments page
+        window.router.register('appointments', () => this.renderAppointmentsPage());
+
+        // Redeem points page
+        window.router.register('redeem', () => this.renderRedeemPage());
+
+        // Points Dashboard page - Requirements: 21.1-21.8
+        window.router.register('points', () => this.renderPointsDashboardPage());
+
+        // Other pages - placeholder for now
+        const placeholderPages = [
+            'coupons', 'symptom'
+        ];
+
+        placeholderPages.forEach(page => {
+            window.router.register(page, (params) => this.renderPlaceholderPage(page, params));
+        });
+
+        // Register page - full implementation
+        window.router.register('register', () => this.renderRegisterPage());
+
+        // Settings page - personal info editor
+        window.router.register('settings', () => this.renderSettingsPage());
+
+        // Odoo Integration pages
+        window.router.register('odoo-link', () => this.renderOdooLinkPage());
+        window.router.register('odoo-orders', () => this.renderOdooOrdersPage());
+        window.router.register('odoo-order-detail', (params) => this.renderOdooOrderDetailPage(params));
+        window.router.register('odoo-order-tracking', (params) => this.renderOdooOrderTrackingPage(params));
+        window.router.register('odoo-invoices', () => this.renderOdooInvoicesPage());
+        window.router.register('odoo-credit-status', () => this.renderOdooCreditStatusPage());
+        window.router.register('odoo-slip', () => this.renderOdooSlipPage());
+    }
+
+    /**
+     * Handle route change
+     */
+    onRouteChange(route, params) {
+        console.log('📍 Route changed:', route.page, params);
+
+        // Update cart badge
+        this.updateCartBadge();
+
+        // Update store
+        if (window.store) {
+            window.store.setCurrentPage(route.page);
+        }
+
+        // Remove checkout submit bar when leaving checkout page
+        if (route.page !== 'checkout') {
+            this.removeCheckoutSubmitBar();
+        }
+
+        // Show/hide cart summary bar based on page (only show on shop page)
+        const cartSummaryBar = document.getElementById('cart-summary-bar');
+        if (cartSummaryBar) {
+            if (route.page === 'shop') {
+                // Update and show cart summary bar on shop page
+                this.updateCartSummaryBar();
+            } else {
+                // Hide on other pages
+                cartSummaryBar.classList.remove('visible');
+            }
+        }
+
+        // Hide/show bottom nav based on page
+        const bottomNav = document.getElementById('bottom-nav');
+        if (bottomNav) {
+            // Hide bottom nav on checkout and video-call pages
+            if (route.page === 'checkout' || route.page === 'video-call') {
+                bottomNav.style.display = 'none';
+            } else {
+                bottomNav.style.display = '';
+            }
+        }
+
+        // Load page-specific data
+        if (route.page === 'home') {
+            // Load pharmacists after a short delay to allow DOM to render
+            setTimeout(() => this.loadPharmacists(), 100);
+        }
+
+        // Initialize video call page
+        if (route.page === 'video-call') {
+            setTimeout(() => this.initVideoCallPage(), 100);
+        }
+
+        // Load wishlist data
+        if (route.page === 'wishlist') {
+            setTimeout(() => this.loadWishlistData(), 100);
+        }
+
+        // Load notification settings
+        if (route.page === 'notifications') {
+            setTimeout(() => this.loadNotificationSettings(), 100);
+        }
+
+        // Load medication reminders
+        if (route.page === 'medication-reminders') {
+            setTimeout(() => this.loadMedicationRemindersData(), 100);
+        }
+
+        // Initialize AI assistant page
+        if (route.page === 'ai-assistant') {
+            setTimeout(() => this.initAIAssistantPage(params), 100);
+        }
+
+        // Initialize health profile page
+        if (route.page === 'health-profile') {
+            setTimeout(() => this.initHealthProfilePage(), 100);
+        }
+
+        // Initialize Odoo pages
+        if (route.page === 'odoo-link') {
+            setTimeout(() => this.initOdooLinkPage(), 100);
+        }
+        if (route.page === 'odoo-order-detail') {
+            setTimeout(() => this.initOdooOrderDetailPage(params), 100);
+        }
+        if (route.page === 'odoo-order-tracking') {
+            setTimeout(() => this.initOdooOrderTrackingPage(params), 100);
+        }
+        if (route.page === 'odoo-invoices') {
+            setTimeout(() => this.initOdooInvoicesPage(), 100);
+        }
+        if (route.page === 'odoo-slip') {
+            setTimeout(() => this.initOdooSlipPage(), 100);
+        }
+        if (route.page === 'odoo-credit-status') {
+            setTimeout(() => this.initOdooCreditStatusPage(), 100);
+        }
+    }
+
+    /**
+     * Setup event listeners
+     */
+    setupEventListeners() {
+        // Bottom navigation clicks
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.preventDefault();
+                const href = item.getAttribute('href');
+                if (href) {
+                    window.router.navigate(href.replace('#', ''));
+                }
+            });
+        });
+
+        // Cart updates
+        if (window.store) {
+            window.store.subscribe('cart', () => {
+                this.updateCartBadge();
+            });
+        }
+
+        // Online/offline events
+        window.addEventListener('online', () => {
+            this.showToast('กลับมาออนไลน์แล้ว', 'success');
+        });
+
+        window.addEventListener('offline', () => {
+            this.showToast('ไม่มีการเชื่อมต่ออินเทอร์เน็ต', 'warning');
+        });
+    }
+
+    /**
+     * Show the app (hide loading)
+     */
+    showApp() {
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const app = document.getElementById('app');
+
+        if (loadingOverlay) {
+            loadingOverlay.classList.add('hidden');
+        }
+
+        if (app) {
+            app.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Show error state
+     */
+    showError(error) {
+        const loadingOverlay = document.getElementById('loading-overlay');
+
+        if (loadingOverlay) {
+            loadingOverlay.innerHTML = `
+                <div class="error-state">
+                    <div class="error-icon error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <h2>เกิดข้อผิดพลาด</h2>
+                    <p>${error.message || 'ไม่สามารถโหลดแอปพลิเคชันได้'}</p>
+                    <button class="btn btn-primary" onclick="location.reload()">
+                        <i class="fas fa-redo"></i> ลองใหม่
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Update cart badge
+     */
+    updateCartBadge() {
+        const badge = document.getElementById('cart-badge');
+        if (!badge) return;
+
+        const count = window.store?.getCartCount() || 0;
+
+        if (count > 0) {
+            badge.textContent = count > 99 ? '99+' : count;
+            badge.classList.remove('hidden');
+        } else {
+            badge.classList.add('hidden');
+        }
+    }
+
+    /**
+     * Show toast notification
+     */
+    showToast(message, type = 'info', duration = 3000) {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+
+        container.appendChild(toast);
+
+        // Auto remove
+        setTimeout(() => {
+            toast.style.animation = 'toast-out 0.3s ease forwards';
+            setTimeout(() => toast.remove(), 300);
+        }, duration);
+    }
+
+    /**
+     * Show welcome modal for new members with confetti effect
+     */
+    showWelcomeModal(memberName, bonusPoints = 50) {
+        // Fix: Check if welcome bonus already received to prevent loop
+        if (localStorage.getItem('welcome_bonus_received')) {
+            // Check onboarding immediately if welcome modal is skipped
+            this.checkAndShowOnboarding();
+            return;
+        }
+
+        // Create modal overlay
+        const modalOverlay = document.createElement('div');
+        modalOverlay.className = 'welcome-modal-overlay';
+        modalOverlay.innerHTML = `
+            <div class="welcome-modal welcome-premium">
+                <div class="confetti-container">
+                    ${Array(50).fill().map((_, i) => `<div class="confetti" style="--delay: ${Math.random() * 3}s; --x: ${Math.random() * 100}vw; --rotation: ${Math.random() * 360}deg; --color: ${['#FFD700', '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'][i % 6]}"></div>`).join('')}
+                </div>
+                <div class="welcome-icon">🎉</div>
+                <h2 class="welcome-title">ยินดีต้อนรับ!</h2>
+                <p class="welcome-name">${memberName || 'สมาชิกใหม่'}</p>
+                <div class="welcome-bonus">
+                    <span class="bonus-icon">🎁</span>
+                    <span class="bonus-text">คุณได้รับ <strong>${bonusPoints} พอยท์</strong> ต้อนรับ!</span>
+                </div>
+                <p class="welcome-message">ขอบคุณที่เป็นส่วนหนึ่งของเรา<br>สะสมพอยท์แลกของรางวัลสุดพิเศษได้เลย</p>
+                <button class="welcome-btn" onclick="window.liffApp.closeWelcomeModal()">
+                    เริ่มต้นใช้งาน
+                </button>
+            </div>
+        `;
+
+        // Add styles if not already present
+        if (!document.getElementById('welcome-modal-styles')) {
+            const styles = document.createElement('style');
+            styles.id = 'welcome-modal-styles';
+            styles.textContent = `
+                .welcome-modal-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0, 0, 0, 0.7);
+                    backdrop-filter: blur(8px);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 10000;
+                    animation: fadeIn 0.3s ease;
+                }
+                .welcome-modal {
+                    background: linear-gradient(135deg, rgba(255,255,255,0.95), rgba(255,255,255,0.85));
+                    border-radius: 24px;
+                    padding: 40px 32px;
+                    text-align: center;
+                    max-width: 340px;
+                    width: 90%;
+                    position: relative;
+                    overflow: hidden;
+                    box-shadow: 0 25px 50px rgba(0,0,0,0.3);
+                    animation: scaleIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+                }
+                .welcome-icon {
+                    font-size: 64px;
+                    margin-bottom: 16px;
+                    animation: bounce 1s ease infinite;
+                }
+                .welcome-title {
+                    font-size: 28px;
+                    font-weight: 700;
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    margin: 0 0 8px 0;
+                }
+                .welcome-name {
+                    font-size: 20px;
+                    color: #333;
+                    margin: 0 0 20px 0;
+                }
+                .welcome-bonus {
+                    background: linear-gradient(135deg, #FFD700, #FFA500);
+                    border-radius: 16px;
+                    padding: 16px 24px;
+                    margin: 20px 0;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 12px;
+                    animation: pulseGlow 2s ease infinite;
+                }
+                .bonus-icon { font-size: 28px; }
+                .bonus-text {
+                    font-size: 16px;
+                    color: #333;
+                }
+                .bonus-text strong {
+                    font-size: 20px;
+                    color: #8B4513;
+                }
+                .welcome-message {
+                    color: #666;
+                    font-size: 14px;
+                    line-height: 1.6;
+                    margin: 16px 0 24px 0;
+                }
+                .welcome-btn {
+                    background: linear-gradient(135deg, #667eea, #764ba2);
+                    color: white;
+                    border: none;
+                    padding: 14px 48px;
+                    border-radius: 50px;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                }
+                .welcome-btn:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+                }
+                .confetti-container {
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    pointer-events: none;
+                    overflow: hidden;
+                }
+                .confetti {
+                    position: absolute;
+                    width: 10px;
+                    height: 10px;
+                    background: var(--color);
+                    top: -20px;
+                    left: var(--x);
+                    transform: rotate(var(--rotation));
+                    animation: confettiFall 3s ease-out var(--delay) forwards;
+                }
+                @keyframes confettiFall {
+                    0% { top: -20px; opacity: 1; }
+                    100% { top: 110%; opacity: 0; transform: rotate(720deg); }
+                }
+                @keyframes bounce {
+                    0%, 100% { transform: translateY(0); }
+                    50% { transform: translateY(-10px); }
+                }
+                @keyframes pulseGlow {
+                    0%, 100% { box-shadow: 0 0 20px rgba(255, 215, 0, 0.3); }
+                    50% { box-shadow: 0 0 30px rgba(255, 215, 0, 0.6); }
+                }
+            `;
+            document.head.appendChild(styles);
+        }
+
+        document.body.appendChild(modalOverlay);
+
+        // Auto close after 10 seconds (increased from 8) and trigger onboarding
+        setTimeout(() => {
+            if (document.body.contains(modalOverlay)) {
+                this.closeWelcomeModal();
+            }
+        }, 10000);
+    }
+
+    /**
+     * Close welcome modal and start onboarding
+     */
+    closeWelcomeModal() {
+        const overlay = document.querySelector('.welcome-modal-overlay');
+        if (overlay) {
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+            }, 300);
+        }
+
+        // Save state to prevent showing again
+        localStorage.setItem('welcome_bonus_received', 'true');
+
+        // Start Onboarding Tour
+        this.checkAndShowOnboarding();
+    }
+    /**
+     * Check and show onboarding for visitors
+     * Shows every time until user completes it by clicking "เริ่มใช้งาน"
+     */
+    /**
+     * Check and start onboarding tour
+     */
+    checkAndShowOnboarding() {
+        // Use a new key for the tour version
+        const tourKey = `liff_tour_completed_${this.config.ACCOUNT_ID || 0}_v2`;
+        const hasCompletedTour = localStorage.getItem(tourKey);
+
+        if (!hasCompletedTour) {
+            // Wait for home page to render completely (member card, etc.)
+            setTimeout(() => {
+                const memberCard = document.querySelector('.member-card') || document.querySelector('#member-card-flip');
+                if (memberCard) {
+                    this.startOnboardingTour();
+                } else {
+                    // Retry once more if checking too early
+                    setTimeout(() => {
+                        if (document.querySelector('.service-grid')) {
+                            this.startOnboardingTour();
+                        }
+                    }, 1000);
+                }
+            }, 1500);
+        }
+    }
+
+
+    /**
+     * Start the Walkthrough Tour
+     */
+    startOnboardingTour() {
+        const tourKey = `liff_tour_completed_${this.config.ACCOUNT_ID || 0}_v2`;
+
+        // Define tour steps
+        const steps = [
+            {
+                element: '.member-card',
+                title: 'บัตรสมาชิกของคุณ',
+                content: 'เช็คแต้ม ระดับสมาชิก และดูสิทธิพิเศษได้ที่นี่ กดที่บัตรเพื่อดูรายละเอียดเพิ่มเติม',
+                position: 'bottom'
+            },
+            {
+                element: '.service-grid',
+                title: 'บริการหลัก',
+                content: 'เมนูทางลัดสำหรับสั่งยา ปรึกษาเภสัชกร และดูแลสุขภาพแบบครบวงจร',
+                position: 'top'
+            },
+            {
+                element: '#bottom-nav',
+                title: 'เมนูนำทาง',
+                content: 'เปลี่ยนหน้าไปร้านค้า ตะกร้าสินค้า หรือดูโปรไฟล์ของคุณได้จากแถบด้านล่างนี้',
+                position: 'top'
+            }
+        ];
+
+        // Create UI Elements
+        const overlay = document.createElement('div');
+        overlay.id = 'tour-overlay';
+
+        const highlight = document.createElement('div');
+        highlight.id = 'tour-highlight';
+
+        const tooltip = document.createElement('div');
+        tooltip.id = 'tour-tooltip';
+
+        document.body.appendChild(overlay);
+        document.body.appendChild(highlight);
+        document.body.appendChild(tooltip);
+
+        // Inject Styles
+        if (!document.getElementById('tour-styles')) {
+            const styles = document.createElement('style');
+            styles.id = 'tour-styles';
+            styles.textContent = `
+                #tour-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0, 0, 0, 0.75);
+                    z-index: 10000;
+                    opacity: 0;
+                    transition: all 0.3s ease;
+                    pointer-events: auto;
+                    backdrop-filter: blur(2px);
+                }
+                #tour-highlight {
+                    position: absolute;
+                    z-index: 10001;
+                    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.5), 0 0 0 9999px rgba(0, 0, 0, 0.75);
+                    border-radius: 12px;
+                    transition: all 0.4s cubic-bezier(0.25, 0.4, 0.25, 1);
+                    pointer-events: none;
+                }
+                #tour-tooltip {
+                    position: absolute;
+                    z-index: 10002;
+                    background: white;
+                    padding: 24px;
+                    border-radius: 20px;
+                    width: 290px;
+                    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+                    opacity: 0;
+                    transition: all 0.3s ease;
+                    text-align: center;
+                    animation: floatTooltip 3s ease-in-out infinite;
+                }
+                @keyframes floatTooltip {
+                    0%, 100% { transform: translateY(0); }
+                    50% { transform: translateY(-5px); }
+                }
+                #tour-tooltip h3 {
+                    margin: 0 0 10px 0;
+                    font-size: 19px;
+                    color: #1F2937;
+                    font-weight: 700;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                }
+                #tour-tooltip h3 i {
+                    color: var(--primary, #10B981);
+                }
+                #tour-tooltip p {
+                    margin: 0 0 20px 0;
+                    font-size: 15px;
+                    color: #4B5563;
+                    line-height: 1.6;
+                }
+                .tour-actions {
+                    display: flex;
+                    justify-content: space-between;
+                    gap: 12px;
+                }
+                .tour-btn {
+                    padding: 12px 16px;
+                    border-radius: 14px;
+                    font-size: 15px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    border: none;
+                    transition: all 0.2s;
+                }
+                .tour-btn-skip {
+                    background: #F3F4F6;
+                    color: #6B7280;
+                }
+                .tour-btn-skip:active {
+                    background: #E5E7EB;
+                }
+                .tour-btn-next {
+                    background: linear-gradient(135deg, #10B981, #059669);
+                    color: white;
+                    flex: 1;
+                    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+                }
+                .tour-btn-next:active {
+                    transform: scale(0.96);
+                }
+            `;
+            document.head.appendChild(styles);
+        }
+
+        requestAnimationFrame(() => {
+            overlay.style.opacity = '1';
+        });
+
+        // Function to render steps
+        const renderStep = (index) => {
+            const step = steps[index];
+            let target = document.querySelector(step.element);
+
+            // Fallback strategy
+            if (!target && step.element === '.member-card') {
+                target = document.querySelector('#member-card-flip');
+            }
+
+            if (!target) {
+                // Skip if not found but try continue
+                if (index < steps.length - 1) {
+                    renderStep(index + 1);
+                } else {
+                    this.finishTour(tourKey);
+                }
+                return;
+            }
+
+            // Calculate position
+            const rect = target.getBoundingClientRect();
+            const scrollY = window.scrollY;
+
+            // Set Highlight
+            highlight.style.width = (rect.width + 12) + 'px';
+            highlight.style.height = (rect.height + 12) + 'px';
+            highlight.style.top = (rect.top + scrollY - 6) + 'px';
+            highlight.style.left = (rect.left - 6) + 'px';
+
+            // Scroll to element
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+            // Set Tooltip Content
+            let btnText = index === steps.length - 1 ? 'เริ่มใช้งาน <i class="fas fa-check"></i>' : 'ถัดไป <i class="fas fa-arrow-right"></i>';
+            let icon = index === 0 ? '<i class="fas fa-id-card"></i>' : (index === 1 ? '<i class="fas fa-th-large"></i>' : '<i class="fas fa-compass"></i>');
+
+            tooltip.innerHTML = `
+                <h3>${icon} ${step.title}</h3>
+                <p>${step.content}</p>
+                <div class="tour-actions">
+                    <button class="tour-btn tour-btn-skip" onclick="window.liffApp.endTour()">ข้าม</button>
+                    <button class="tour-btn tour-btn-next" onclick="window.liffApp.nextTourStep()">${btnText}</button>
+                </div>
+            `;
+
+            // Position Tooltip
+            const tooltipHeight = 180;
+            let tooltipTop;
+
+            const spaceAbove = rect.top;
+            const spaceBelow = window.innerHeight - rect.bottom;
+
+            if (step.position === 'top' && spaceAbove > 220) {
+                tooltipTop = rect.top + scrollY - tooltipHeight - 30;
+            } else if (spaceBelow > 220) {
+                tooltipTop = rect.bottom + scrollY + 30;
+            } else {
+                // Fallback
+                if (spaceAbove > spaceBelow) {
+                    tooltipTop = rect.top + scrollY - tooltipHeight - 30;
+                } else {
+                    tooltipTop = rect.bottom + scrollY + 30;
+                }
+            }
+
+            tooltip.style.top = Math.max(10, tooltipTop) + 'px';
+            tooltip.style.left = '50%';
+            tooltip.style.transform = 'translateX(-50%)';
+            tooltip.style.opacity = '1';
+        };
+
+        // Bind control methods
+        this.tourSteps = steps;
+        this.currentTourStep = 0;
+
+        this.nextTourStep = () => {
+            if (this.currentTourStep < this.tourSteps.length - 1) {
+                this.currentTourStep++;
+                renderStep(this.currentTourStep);
+            } else {
+                this.finishTour(tourKey);
+            }
+        };
+
+        this.endTour = () => {
+            this.cleanupTourUI();
+        };
+
+        this.finishTour = (key) => {
+            localStorage.setItem(key, 'true');
+            this.cleanupTourUI();
+        };
+
+        this.cleanupTourUI = () => {
+            const overlay = document.getElementById('tour-overlay');
+            const highlight = document.getElementById('tour-highlight');
+            const tooltip = document.getElementById('tour-tooltip');
+
+            if (overlay) overlay.style.opacity = '0';
+            if (tooltip) tooltip.style.opacity = '0';
+
+            setTimeout(() => {
+                if (overlay) overlay.remove();
+                if (highlight) highlight.remove();
+                if (tooltip) tooltip.remove();
+            }, 300);
+        };
+
+        // Start
+        setTimeout(() => renderStep(0), 500);
+    }
+
+
+
+    /**
+     * Fetch with retry logic
+     */
+    async fetchWithRetry(url, options = {}, retries = 3) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                return response;
+
+            } catch (error) {
+                console.warn(`Fetch attempt ${i + 1} failed:`, error);
+
+                if (i === retries - 1) {
+                    throw error;
+                }
+
+                // Wait before retry (exponential backoff)
+                await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+            }
+        }
+    }
+
+    /**
+     * Send message via LIFF
+     */
+    async sendMessage(text) {
+        if (!this.isInClient) {
+            console.warn('sendMessage only works in LINE app');
+            return false;
+        }
+
+        try {
+            await liff.sendMessages([{ type: 'text', text }]);
+            return true;
+        } catch (error) {
+            console.error('Send message error:', error);
+            return false;
+        }
+    }
+
+    /**
+     * Login via LIFF
+     */
+    login() {
+        if (this.isInitialized && !liff.isLoggedIn()) {
+            liff.login();
+        } else if (!this.isInitialized) {
+            // Redirect to LIFF URL
+            window.location.href = `https://liff.line.me/${this.config.LIFF_ID}`;
+        }
+    }
+
+    /**
+     * Logout
+     */
+    logout() {
+        if (this.isInitialized && liff.isLoggedIn()) {
+            liff.logout();
+            window.location.reload();
+        }
+    }
+
+    /**
+     * Close LIFF window
+     */
+    closeWindow() {
+        if (this.isInClient) {
+            liff.closeWindow();
+        } else {
+            window.close();
+        }
+    }
+
+    // ==================== Page Renderers ====================
+
+    /**
+     * Render home page - Telecare Style Dashboard
+     * Requirements: 13.1, 13.4, 13.5, 13.6, 13.7, 13.8, 13.9
+     */
+    renderHomePage() {
+        const profile = window.store?.get('profile');
+        const member = window.store?.get('member');
+        const tier = window.store?.get('tier');
+        const shopName = this.config.SHOP_NAME || 'ร้านค้า';
+        const companyName = this.config.COMPANY_NAME || shopName;
+        const shopLogo = this.config.SHOP_LOGO || '';
+
+        return `
+            <div class="home-page">
+                <!-- Header with Shop Logo and Notifications (Requirement 13.1) -->
+                <div class="home-header">
+                    <div class="home-header-content">
+                        <div class="home-header-left">
+                            ${shopLogo ? `
+                                <img src="${shopLogo}" alt="${shopName}" class="home-logo" 
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                <div class="home-logo-fallback" style="display:none;">
+                                    <i class="fas fa-clinic-medical"></i>
+                                </div>
+                            ` : `
+                                <div class="home-logo-fallback">
+                                    <i class="fas fa-clinic-medical"></i>
+                                </div>
+                            `}
+                            <div class="home-header-text">
+                                <h1 class="home-shop-name">${shopName}</h1>
+                                <p class="home-shop-tagline">Health & Wellness</p>
+                            </div>
+                        </div>
+                        <div class="home-header-actions">
+                            <button class="home-header-btn" onclick="window.router.navigate('/notifications')">
+                                <i class="far fa-bell"></i>
+                                <span class="notification-dot"></span>
+                            </button>
+                            <button class="home-header-btn" onclick="window.router.navigate('/ai-assistant')">
+                                <i class="far fa-comment-dots"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Member Card Section with Gradient Background (Requirement 13.2, 13.3) -->
+                <div class="home-member-section">
+                    ${this.renderMemberCardComponent(profile, member, tier, companyName)}
+                </div>
+                
+                <!-- 3x2 Service Grid with Icons (Requirement 13.4, 13.5) -->
+                <div class="home-services-section">
+                    <div class="service-grid">
+                        ${this.renderServiceGrid()}
+                    </div>
+                </div>
+                
+                <!-- AI Assistant Quick Actions Section (Requirement 13.6, 13.7) -->
+                <div class="home-ai-section">
+                    ${this.renderAIAssistantSection()}
+                </div>
+                
+                <!-- Available Pharmacists Section (Requirement 13.8, 13.9) -->
+                <div class="home-pharmacists-section">
+                    ${this.renderPharmacistsSection()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render Member Card Component
+     * Requirements: 5.1, 5.2, 5.3, 5.4, 13.2, 13.3
+     * - Display member name, ID, tier, points, expiry
+     * - Add QR code generation for POS scanning
+     * - Implement tier progress bar
+     */
+    renderMemberCardComponent(profile, member, tier, companyName) {
+        if (!profile) {
+            return `
+                <div class="member-card member-card-guest">
+                    <div class="member-card-decor"></div>
+                    <div class="member-card-content">
+                        <div class="member-card-guest-content">
+                            <div class="member-card-guest-icon">
+                                <i class="fas fa-user-plus"></i>
+                            </div>
+                            <h3 class="member-card-guest-title">เข้าสู่ระบบเพื่อดูบัตรสมาชิก</h3>
+                            <p class="member-card-guest-desc">รับสิทธิพิเศษและสะสมแต้มได้ทันที</p>
+                            <button class="btn btn-white" onclick="window.liffApp.login()">
+                                <i class="fab fa-line"></i> เข้าสู่ระบบ LINE
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (!member) {
+            // Auto-registration is in progress or user is loading
+            return `
+                <div class="member-card member-card-guest">
+                    <div class="member-card-decor"></div>
+                    <div class="member-card-content">
+                        <div class="member-card-guest-content">
+                            <div class="member-card-guest-icon">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                            <h3 class="member-card-guest-title">กำลังโหลดข้อมูลสมาชิก...</h3>
+                            <p class="member-card-guest-desc">กรุณารอสักครู่</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Determine tier styling - use color from API if available
+        const tierName = tier?.name || member.tier || 'Silver';
+        // Fix: Use dynamic color with robust fallback
+        let tierColor = tier?.color;
+        if (!tierColor || tierColor === '') {
+            // Fallback map including VIP and Diamond
+            const colors = {
+                'silver': '#C0C0C0',
+                'gold': '#FFD700',
+                'platinum': '#334155',
+                'bronze': '#CD7F32',
+                'vip': '#10B981',
+                'diamond': '#EF4444'
+            };
+            tierColor = colors[String(tierName).toLowerCase()] || '#9CA3AF';
+        }
+        const points = member.points || 0;
+        const nextTierPoints = tier?.next_tier_points || 2000;
+        const currentTierPoints = tier?.current_tier_points || tier?.min_points || 0;
+        const progressPercent = Math.min(100, Math.max(0, ((points - currentTierPoints) / (nextTierPoints - currentTierPoints)) * 100));
+        const pointsToNext = Math.max(0, nextTierPoints - points);
+        const nextTierName = tier?.next_tier_name || this.getNextTierName(tierName);
+        const memberId = member.member_id || member.id || '-';
+        const memberName = member.first_name || profile.displayName || 'สมาชิก';
+        const expiryDate = member.expiry_date ? this.formatDate(member.expiry_date) : '-';
+        const tierIcon = tier?.icon || this.getTierIconEmoji(tierName);
+
+        // Create gradient style from tier color
+        const gradientStyle = `background: linear-gradient(135deg, ${tierColor} 0%, ${tierColor}cc 50%, ${tierColor}99 100%);`;
+
+        return `
+            <div class="member-card" style="${gradientStyle}" onclick="window.router.navigate('/member')">
+                <div class="member-card-decor"></div>
+                <div class="member-card-decor-2"></div>
+                
+                <div class="member-card-content">
+                    <!-- Header Row -->
+                    <div class="member-card-header">
+                        <div class="member-card-brand">
+                            <p class="member-card-company">${companyName} Member</p>
+                            <h2 class="member-card-tier">${tierName} Tier</h2>
+                        </div>
+                        <div class="member-card-tier-icon">
+                            ${tierIcon}
+                        </div>
+                    </div>
+                    
+                    <!-- Info Row -->
+                    <div class="member-card-info">
+                        <div class="member-card-points">
+                            <p class="member-card-points-label">คะแนนสะสม</p>
+                            <p class="member-card-points-value">${this.formatNumber(points)} <span class="member-card-points-unit">pt</span></p>
+                        </div>
+                        <div class="member-card-id">
+                            <p class="member-card-id-label">หมายเลขสมาชิก</p>
+                            <p class="member-card-id-value">${this.formatMemberId(memberId)}</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Progress Bar (Requirement 5.4) -->
+                    <div class="member-card-progress">
+                        <div class="member-card-progress-bar">
+                            <div class="member-card-progress-fill" style="width: ${progressPercent}%"></div>
+                        </div>
+                        <p class="member-card-progress-text">อีก ${this.formatNumber(pointsToNext)} คะแนน เพื่อเลื่อนเป็น ${nextTierName}</p>
+                    </div>
+                    
+                    <!-- Flip Hint -->
+                    <div class="member-card-flip-hint">
+                        <i class="fas fa-qrcode"></i>
+                        <span>แตะเพื่อดู QR Code</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Get tier CSS class based on tier name
+     */
+    getTierClass(tierName) {
+        const tierLower = (tierName || '').toLowerCase();
+        if (tierLower.includes('platinum') || tierLower.includes('vip')) return 'member-card-platinum';
+        if (tierLower.includes('gold')) return 'member-card-gold';
+        if (tierLower.includes('bronze')) return 'member-card-bronze';
+        return 'member-card-silver';
+    }
+
+    /**
+     * Get tier icon based on tier name
+     */
+    getTierIcon(tierName) {
+        const tierLower = (tierName || '').toLowerCase();
+        if (tierLower.includes('platinum') || tierLower.includes('vip')) {
+            return '<i class="fas fa-gem"></i>';
+        }
+        if (tierLower.includes('gold')) {
+            return '<i class="fas fa-crown"></i>';
+        }
+        if (tierLower.includes('bronze')) {
+            return '<i class="fas fa-medal"></i>';
+        }
+        return '<i class="fas fa-star"></i>';
+    }
+
+    /**
+     * Get next tier name
+     */
+    getNextTierName(currentTier) {
+        const tierLower = (currentTier || '').toLowerCase();
+        if (tierLower.includes('silver')) return 'Gold';
+        if (tierLower.includes('gold')) return 'Platinum';
+        if (tierLower.includes('bronze')) return 'Silver';
+        return 'Gold';
+    }
+
+    /**
+     * Get default tier color when not provided by API
+     */
+    getTierDefaultColor(tierName) {
+        const tierLower = (tierName || '').toLowerCase();
+        if (tierLower.includes('platinum') || tierLower.includes('vip') || tierLower.includes('diamond')) return '#6366F1';
+        if (tierLower.includes('gold')) return '#D97706';
+        if (tierLower.includes('bronze')) return '#92400E';
+        return '#475569'; // Silver/default
+    }
+
+    /**
+     * Get tier icon emoji for display
+     */
+    getTierIconEmoji(tierName) {
+        const tierLower = (tierName || '').toLowerCase();
+        if (tierLower.includes('platinum') || tierLower.includes('diamond')) return '💎';
+        if (tierLower.includes('vip') || tierLower.includes('royal')) return '👑';
+        if (tierLower.includes('gold')) return '🥇';
+        if (tierLower.includes('bronze')) return '🥉';
+        return '🥈'; // Silver/default
+    }
+
+    /**
+     * Format member ID for display
+     */
+    formatMemberId(id) {
+        if (!id || id === '-') return '-';
+        const str = String(id).replace(/\D/g, '');
+        if (str.length <= 4) return str;
+        return str.match(/.{1,4}/g).join(' ');
+    }
+
+    /**
+     * Format date for display
+     */
+    formatDate(dateStr) {
+        if (!dateStr) return '-';
+        try {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
+        } catch (e) {
+            return dateStr;
+        }
+    }
+
+    /**
+     * Render service grid - 3x2 layout
+     * Requirements: 13.4, 13.5
+     */
+    renderServiceGrid() {
+        const services = [
+            { icon: 'fa-store', label: 'ร้านค้า', page: 'shop', bgColor: '#E6F7F6', iconColor: '#11B0A6' },
+            { icon: 'fa-shopping-cart', label: 'ตะกร้า', page: 'cart', bgColor: '#FFF7ED', iconColor: '#F97316' },
+            { icon: 'fa-box-open', label: 'ออเดอร์', page: 'orders', bgColor: '#EFF6FF', iconColor: '#3B82F6' },
+            { icon: 'fa-robot', label: 'ผู้ช่วย AI', page: 'ai-assistant', bgColor: '#F3E8FF', iconColor: '#9333EA' },
+            { icon: 'fa-calendar-check', label: 'นัดหมาย', page: 'appointments', bgColor: '#FFE4E6', iconColor: '#F43F5E' },
+            { icon: 'fa-gift', label: 'แลกแต้ม', page: 'redeem', bgColor: '#FEF3C7', iconColor: '#F59E0B' }
+        ];
+
+        return services.map(s => `
+            <div class="service-item" onclick="window.router.navigate('/${s.page}')">
+                <div class="service-icon" style="background-color: ${s.bgColor}; color: ${s.iconColor};">
+                    <i class="fas ${s.icon}"></i>
+                </div>
+                <span class="service-label">${s.label}</span>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * Render AI assistant section with gradient background
+     * Requirements: 13.6, 13.7
+     */
+    renderAIAssistantSection() {
+        const symptoms = [
+            { icon: 'fa-head-side-virus', label: 'ปวดหัว', query: 'ปวดหัว' },
+            { icon: 'fa-thermometer-half', label: 'ไข้หวัด', query: 'ไข้หวัด' },
+            { icon: 'fa-stomach', label: 'ปวดท้อง', query: 'ปวดท้อง' },
+            { icon: 'fa-allergies', label: 'แพ้อากาศ', query: 'แพ้อากาศ' }
+        ];
+
+        return `
+            <div class="ai-assistant-card">
+                <div class="ai-assistant-header">
+                    <div class="ai-assistant-icon">
+                        <i class="fas fa-robot"></i>
+                    </div>
+                    <div class="ai-assistant-text">
+                        <h3 class="ai-assistant-title">ผู้ช่วย AI ร้านยา</h3>
+                        <p class="ai-assistant-desc">ถามเรื่องยาและสุขภาพได้เลย</p>
+                    </div>
+                    <button class="ai-assistant-expand" onclick="window.router.navigate('/ai-assistant')">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+                <div class="ai-symptom-buttons">
+                    ${symptoms.map(s => `
+                        <button class="ai-symptom-btn" onclick="window.liffApp.startSymptomChat('${s.query}')">
+                            <i class="fas ${s.icon}"></i>
+                            <span>${s.label}</span>
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Start symptom chat with AI
+     */
+    startSymptomChat(symptom) {
+        // Navigate to AI assistant with symptom query
+        window.router.navigate('/ai-assistant', { symptom });
+    }
+
+    /**
+     * Render available pharmacists section
+     * Requirements: 13.8, 13.9
+     */
+    renderPharmacistsSection() {
+        // This will be populated from API, showing skeleton initially
+        return `
+            <div class="pharmacists-section">
+                <div class="section-header">
+                    <h3 class="section-title">เภสัชกรพร้อมให้บริการ</h3>
+                    <button class="section-more" onclick="window.router.navigate('/appointments')">
+                        ดูทั้งหมด <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+                <div id="pharmacists-list" class="pharmacists-list">
+                    ${this.renderPharmacistsSkeleton()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render pharmacists skeleton loading
+     */
+    renderPharmacistsSkeleton() {
+        return window.Skeleton ? window.Skeleton.pharmacistCards(2) : `
+            <div class="skeleton-pharmacist-card">
+                <div class="skeleton skeleton-pharmacist-photo"></div>
+                <div class="skeleton-pharmacist-info">
+                    <div class="skeleton skeleton-text"></div>
+                    <div class="skeleton skeleton-text short"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Load and render pharmacists from API
+     */
+    async loadPharmacists() {
+        const container = document.getElementById('pharmacists-list');
+        if (!container) return;
+
+        try {
+            const url = `${this.config.BASE_URL}/api/pharmacist.php?action=available&line_account_id=${this.config.ACCOUNT_ID}`;
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+
+            if (data.success && data.pharmacists && data.pharmacists.length > 0) {
+                container.innerHTML = this.renderPharmacistCards(data.pharmacists);
+            } else {
+                container.innerHTML = this.renderNoPharmacists();
+            }
+        } catch (error) {
+            console.error('Error loading pharmacists:', error);
+            container.innerHTML = this.renderNoPharmacists();
+        }
+    }
+
+    /**
+     * Render pharmacist cards
+     * Requirements: 13.8, 13.9
+     * - Display pharmacist cards with photo, name, specialty
+     * - Add "Book" button for each pharmacist
+     */
+    renderPharmacistCards(pharmacists) {
+        return pharmacists.slice(0, 3).map(p => `
+            <div class="pharmacist-card">
+                <div class="pharmacist-photo">
+                    ${p.is_online ? '<span class="pharmacist-online-badge"></span>' : ''}
+                    <img src="${p.photo_url || ''}" alt="${p.name}"
+                         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%2311B0A6%22/><text x=%2250%22 y=%2265%22 text-anchor=%22middle%22 fill=%22white%22 font-size=%2240%22>${(p.name || 'P').charAt(0)}</text></svg>'">
+                </div>
+                <div class="pharmacist-info">
+                    <h4 class="pharmacist-name">${p.name || 'เภสัชกร'}</h4>
+                    <p class="pharmacist-specialty">${p.specialty || 'เภสัชกรทั่วไป'}</p>
+                    ${p.rating ? `
+                        <div class="pharmacist-rating">
+                            <i class="fas fa-star"></i>
+                            <span>${p.rating}</span>
+                            ${p.review_count ? `<span class="pharmacist-reviews">(${p.review_count})</span>` : ''}
+                        </div>
+                    ` : ''}
+                    ${p.schedule ? `
+                        <div class="pharmacist-schedule">
+                            <i class="far fa-clock"></i>
+                            <span>${p.schedule}</span>
+                        </div>
+                    ` : ''}
+                </div>
+                <button class="pharmacist-book-btn" onclick="window.liffApp.bookPharmacist(${p.id})">
+                    <i class="fas fa-calendar-plus"></i>
+                    นัดหมาย
+                </button>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * Render no pharmacists available state
+     */
+    renderNoPharmacists() {
+        return `
+            <div class="no-pharmacists">
+                <i class="fas fa-user-md"></i>
+                <p>ไม่มีเภสัชกรพร้อมให้บริการในขณะนี้</p>
+                <button class="btn btn-sm btn-outline" onclick="window.router.navigate('/appointments')">
+                    ดูตารางนัดหมาย
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Book pharmacist appointment
+     */
+    bookPharmacist(pharmacistId) {
+        window.router.navigate('/appointments', { pharmacist_id: pharmacistId });
+    }
+
+    /**
+     * Render shop page - Product Catalog
+     * Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 11.1
+     * - 2-column grid layout optimized for mobile
+     * - Sticky search bar and category filter
+     * - Product cards with image, name, price, add to cart
+     * - AJAX add to cart without page reload
+     * - Floating cart summary bar
+     * - Infinite scroll pagination
+     * - Real-time search filtering
+     */
+    renderShopPage() {
+        // Initialize shop state
+        this.shopState = {
+            products: [],
+            categories: [],
+            flashSaleProducts: [],
+            choiceProducts: [],
+            currentPage: 1,
+            totalPages: 1,
+            hasMore: false,
+            isLoading: false,
+            isLoadingMore: false,
+            searchQuery: '',
+            selectedCategory: null,
+            sortBy: 'newest',
+            searchDebounceTimer: null
+        };
+
+        // Load initial data after render
+        setTimeout(() => {
+            this.loadCategories();
+            this.loadFlashSaleProducts();
+            this.loadChoiceProducts();
+            this.loadProducts();
+            this.setupShopEventListeners();
+            this.updateCartSummaryBar();
+        }, 100);
+
+        return `
+            <div class="shop-page">
+                <!-- Sticky Header with Search and Categories (Requirement 2.2) -->
+                <div class="shop-header">
+                    <div class="shop-header-top">
+                        <button class="shop-back-btn" onclick="window.router.navigate('/')">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <div class="shop-search-container">
+                            <i class="fas fa-search shop-search-icon"></i>
+                            <input type="text" 
+                                   id="shop-search-input"
+                                   class="shop-search-input" 
+                                   placeholder="ค้นหายา, วิตามิน, อุปกรณ์..."
+                                   autocomplete="off">
+                            <button id="shop-search-clear" class="shop-search-clear">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Category Filter Pills -->
+                    <div id="shop-categories" class="shop-categories">
+                        ${window.Skeleton ? window.Skeleton.categoryFilter(5) : this.renderCategorySkeleton()}
+                    </div>
+                </div>
+
+                <!-- Flash Sale Section -->
+                <div id="flash-sale-section" class="shop-promo-section hidden">
+                    <div class="promo-section-header">
+                        <div class="promo-section-title">
+                            <i class="fas fa-bolt flash-icon"></i>
+                            <span>Flash Sale</span>
+                            <span id="flash-sale-timer" class="flash-timer"></span>
+                        </div>
+                        <button class="promo-see-all" onclick="window.liffApp.filterByType('flash_sale')">
+                            ดูทั้งหมด <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                    <div id="flash-sale-products" class="promo-products-scroll">
+                        ${window.Skeleton ? window.Skeleton.productCards(3) : ''}
+                    </div>
+                </div>
+
+                <!-- Choice Products Section -->
+                <div id="choice-section" class="shop-promo-section hidden">
+                    <div class="promo-section-header">
+                        <div class="promo-section-title">
+                            <i class="fas fa-award choice-icon"></i>
+                            <span>สินค้า Choice</span>
+                        </div>
+                        <button class="promo-see-all" onclick="window.liffApp.filterByType('choice')">
+                            ดูทั้งหมด <i class="fas fa-chevron-right"></i>
+                        </button>
+                    </div>
+                    <div id="choice-products" class="promo-products-scroll">
+                        ${window.Skeleton ? window.Skeleton.productCards(3) : ''}
+                    </div>
+                </div>
+
+                <!-- Sort & Filter Toolbar -->
+                <div class="shop-toolbar">
+                    <span id="shop-result-count" class="shop-result-count">กำลังโหลด...</span>
+                    <button id="shop-sort-btn" class="shop-sort-btn" onclick="window.liffApp.showSortModal()">
+                        <i class="fas fa-sort-amount-down"></i>
+                        <span id="shop-sort-label">ล่าสุด</span>
+                    </button>
+                </div>
+
+                <!-- Product Grid (Requirement 2.1) -->
+                <div id="shop-product-grid" class="shop-product-grid">
+                    ${window.Skeleton ? window.Skeleton.productCards(6) : this.renderProductSkeleton(6)}
+                </div>
+
+                <!-- Load More Indicator (Requirement 2.6) -->
+                <div id="shop-load-more" class="shop-load-more hidden">
+                    <div class="shop-load-more-spinner"></div>
+                    <span class="shop-load-more-text">กำลังโหลดเพิ่มเติม...</span>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Setup shop page event listeners
+     */
+    setupShopEventListeners() {
+        // Search input with debounce (Requirement 2.7)
+        const searchInput = document.getElementById('shop-search-input');
+        const searchClear = document.getElementById('shop-search-clear');
+
+        if (searchInput) {
+            searchInput.addEventListener('input', (e) => {
+                const query = e.target.value.trim();
+
+                // Show/hide clear button
+                if (searchClear) {
+                    searchClear.classList.toggle('visible', query.length > 0);
+                }
+
+                // Debounce search
+                if (this.shopState.searchDebounceTimer) {
+                    clearTimeout(this.shopState.searchDebounceTimer);
+                }
+
+                this.shopState.searchDebounceTimer = setTimeout(() => {
+                    this.shopState.searchQuery = query;
+                    this.shopState.currentPage = 1;
+                    this.loadProducts(true);
+                }, 300);
+            });
+        }
+
+        if (searchClear) {
+            searchClear.addEventListener('click', () => {
+                if (searchInput) {
+                    searchInput.value = '';
+                    searchClear.classList.remove('visible');
+                    this.shopState.searchQuery = '';
+                    this.shopState.currentPage = 1;
+                    this.loadProducts(true);
+                }
+            });
+        }
+
+        // Infinite scroll (Requirement 2.6)
+        this.setupInfiniteScroll();
+
+        // Subscribe to cart changes
+        if (window.store) {
+            window.store.subscribe('cart', () => {
+                this.updateCartSummaryBar();
+            });
+        }
+    }
+
+    /**
+     * Setup infinite scroll for product loading
+     * Requirement 2.6
+     */
+    setupInfiniteScroll() {
+        const options = {
+            root: null,
+            rootMargin: '200px',
+            threshold: 0
+        };
+
+        const loadMoreEl = document.getElementById('shop-load-more');
+        if (!loadMoreEl) return;
+
+        this.infiniteScrollObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting && this.shopState.hasMore && !this.shopState.isLoadingMore) {
+                    this.loadMoreProducts();
+                }
+            });
+        }, options);
+
+        this.infiniteScrollObserver.observe(loadMoreEl);
+    }
+
+    /**
+     * Load categories from API
+     */
+    async loadCategories() {
+        try {
+            const url = `${this.config.BASE_URL}/api/shop-products.php?action=categories`;
+            console.log('📂 Loading categories from:', url);
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+            console.log('📂 Categories response:', data);
+
+            if (data.success && data.categories) {
+                this.shopState.categories = data.categories;
+                this.renderCategories();
+            } else {
+                console.warn('⚠️ No categories found:', data);
+                this.renderCategories(); // Render with empty categories
+            }
+        } catch (error) {
+            console.error('❌ Error loading categories:', error);
+            this.renderCategories(); // Render with empty categories
+        }
+    }
+
+    /**
+     * Render category filter pills
+     */
+    renderCategories() {
+        const container = document.getElementById('shop-categories');
+        if (!container) return;
+
+        const categories = this.shopState.categories || [];
+        const selectedId = this.shopState.selectedCategory;
+
+        let html = `
+            <button class="category-pill ${!selectedId ? 'active' : ''}" 
+                    onclick="window.liffApp.selectCategory(null)">
+                ทั้งหมด
+            </button>
+        `;
+
+        categories.forEach(cat => {
+            html += `
+                <button class="category-pill ${selectedId == cat.id ? 'active' : ''}" 
+                        onclick="window.liffApp.selectCategory(${cat.id})">
+                    ${cat.name}
+                </button>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    /**
+     * Select a category
+     */
+    selectCategory(categoryId) {
+        this.shopState.selectedCategory = categoryId;
+        this.shopState.currentPage = 1;
+        this.shopState.filterType = null; // Clear filter type when selecting category
+        this.renderCategories();
+        this.loadProducts(true);
+    }
+
+    /**
+     * Load Flash Sale products
+     */
+    async loadFlashSaleProducts() {
+        try {
+            const url = `${this.config.BASE_URL}/api/shop-products.php?type=flash_sale&limit=10`;
+            console.log('⚡ Loading flash sale products from:', url);
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+            console.log('⚡ Flash sale response:', data);
+
+            if (data.success && data.products && data.products.length > 0) {
+                this.shopState.flashSaleProducts = data.products;
+                this.renderFlashSaleSection();
+            } else {
+                console.log('⚡ No flash sale products found');
+                // Hide flash sale section if no products
+                const section = document.getElementById('flash-sale-section');
+                if (section) section.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('❌ Error loading flash sale products:', error);
+        }
+    }
+
+    /**
+     * Render Flash Sale section
+     */
+    renderFlashSaleSection() {
+        const section = document.getElementById('flash-sale-section');
+        const container = document.getElementById('flash-sale-products');
+        if (!section || !container) return;
+
+        const products = this.shopState.flashSaleProducts || [];
+        if (products.length === 0) {
+            section.classList.add('hidden');
+            return;
+        }
+
+        section.classList.remove('hidden');
+        container.innerHTML = products.map(p => this.renderPromoProductCard(p, 'flash')).join('');
+
+        // Start countdown timer if there's a flash_sale_end
+        const firstProduct = products.find(p => p.flash_sale_end);
+        if (firstProduct && firstProduct.flash_sale_end) {
+            this.startFlashSaleTimer(firstProduct.flash_sale_end);
+        }
+    }
+
+    /**
+     * Start Flash Sale countdown timer
+     */
+    startFlashSaleTimer(endTime) {
+        const timerEl = document.getElementById('flash-sale-timer');
+        if (!timerEl) return;
+
+        const updateTimer = () => {
+            const now = new Date().getTime();
+            const end = new Date(endTime).getTime();
+            const diff = end - now;
+
+            if (diff <= 0) {
+                timerEl.innerHTML = '<span class="timer-ended">หมดเวลา</span>';
+                return;
+            }
+
+            const hours = Math.floor(diff / (1000 * 60 * 60));
+            const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+            const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+            timerEl.innerHTML = `
+                <span class="timer-unit">${String(hours).padStart(2, '0')}</span>:
+                <span class="timer-unit">${String(minutes).padStart(2, '0')}</span>:
+                <span class="timer-unit">${String(seconds).padStart(2, '0')}</span>
+            `;
+        };
+
+        updateTimer();
+        this.flashSaleTimerInterval = setInterval(updateTimer, 1000);
+    }
+
+    /**
+     * Load Choice products
+     */
+    async loadChoiceProducts() {
+        try {
+            const url = `${this.config.BASE_URL}/api/shop-products.php?type=choice&limit=10`;
+            console.log('🏆 Loading choice products from:', url);
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+            console.log('🏆 Choice response:', data);
+
+            if (data.success && data.products && data.products.length > 0) {
+                this.shopState.choiceProducts = data.products;
+                this.renderChoiceSection();
+            } else {
+                console.log('🏆 No choice products found');
+                // Hide choice section if no products
+                const section = document.getElementById('choice-section');
+                if (section) section.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('❌ Error loading choice products:', error);
+        }
+    }
+
+    /**
+     * Render Choice products section
+     */
+    renderChoiceSection() {
+        const section = document.getElementById('choice-section');
+        const container = document.getElementById('choice-products');
+        if (!section || !container) return;
+
+        const products = this.shopState.choiceProducts || [];
+        if (products.length === 0) {
+            section.classList.add('hidden');
+            return;
+        }
+
+        section.classList.remove('hidden');
+        container.innerHTML = products.map(p => this.renderPromoProductCard(p, 'choice')).join('');
+    }
+
+    /**
+     * Render promo product card (smaller horizontal card for promo sections)
+     */
+    renderPromoProductCard(product, type = 'default') {
+        const hasSalePrice = product.sale_price && product.sale_price < product.price;
+        const discountPercent = hasSalePrice ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
+        const isOutOfStock = product.stock <= 0;
+
+        return `
+            <div class="promo-product-card ${type}" onclick="window.liffApp.showProductDetailModal(${product.id})">
+                <div class="promo-product-image">
+                    <img src="${product.image_url || this.config.BASE_URL + '/assets/images/image-placeholder.svg'}" 
+                         alt="${product.name}"
+                         loading="lazy"
+                         onerror="this.src='${this.config.BASE_URL}/assets/images/image-placeholder.svg'">
+                    ${hasSalePrice ? `<span class="promo-discount-badge">-${discountPercent}%</span>` : ''}
+                </div>
+                <div class="promo-product-info">
+                    <h4 class="promo-product-name">${product.name}</h4>
+                    <div class="promo-product-price">
+                        ${hasSalePrice ? `
+                            <span class="promo-price-sale">฿${this.formatNumber(product.sale_price)}</span>
+                            <span class="promo-price-original">฿${this.formatNumber(product.price)}</span>
+                        ` : `
+                            <span class="promo-price-current">฿${this.formatNumber(product.price)}</span>
+                        `}
+                    </div>
+                    ${!isOutOfStock ? `
+                        <button class="promo-add-btn" onclick="event.stopPropagation(); window.liffApp.addProductToCart(${product.id})">
+                            <i class="fas fa-cart-plus"></i>
+                        </button>
+                    ` : '<span class="promo-out-of-stock">หมด</span>'}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Filter products by type (flash_sale, choice, featured)
+     */
+    filterByType(type) {
+        this.shopState.selectedCategory = null;
+        this.shopState.currentPage = 1;
+        this.shopState.filterType = type;
+        this.renderCategories();
+        this.loadProducts(true);
+
+        // Scroll to product grid
+        const grid = document.getElementById('shop-product-grid');
+        if (grid) {
+            grid.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }
+
+    /**
+     * Load products from API
+     */
+    async loadProducts(reset = false) {
+        if (this.shopState.isLoading) return;
+
+        this.shopState.isLoading = true;
+
+        const grid = document.getElementById('shop-product-grid');
+        const loadMore = document.getElementById('shop-load-more');
+
+        if (reset && grid) {
+            grid.innerHTML = window.Skeleton ? window.Skeleton.productCards(6) : this.renderProductSkeleton(6);
+        }
+
+        try {
+            const params = new URLSearchParams({
+                page: this.shopState.currentPage,
+                limit: 20,
+                sort: this.shopState.sortBy,
+                account: this.config.ACCOUNT_ID
+            });
+
+            if (this.shopState.searchQuery) {
+                params.append('search', this.shopState.searchQuery);
+            }
+
+            if (this.shopState.selectedCategory) {
+                params.append('category', this.shopState.selectedCategory);
+            }
+
+            // Add filter type if set (flash_sale, choice, featured)
+            if (this.shopState.filterType) {
+                params.append('type', this.shopState.filterType);
+            }
+
+            const url = `${this.config.BASE_URL}/api/shop-products.php?${params.toString()}`;
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+
+            if (data.success) {
+                if (reset) {
+                    this.shopState.products = data.products;
+                } else {
+                    this.shopState.products = [...this.shopState.products, ...data.products];
+                }
+
+                this.shopState.totalPages = data.pagination.total_pages;
+                this.shopState.hasMore = data.pagination.has_more;
+
+                this.renderProducts(reset);
+                this.updateResultCount(data.pagination.total);
+
+                // Show/hide load more indicator
+                if (loadMore) {
+                    loadMore.classList.toggle('hidden', !this.shopState.hasMore);
+                }
+            } else {
+                this.renderNoProducts();
+            }
+        } catch (error) {
+            console.error('Error loading products:', error);
+            this.renderProductError();
+        } finally {
+            this.shopState.isLoading = false;
+        }
+    }
+
+    /**
+     * Load more products (infinite scroll)
+     * Requirement 2.6
+     */
+    async loadMoreProducts() {
+        if (this.shopState.isLoadingMore || !this.shopState.hasMore) return;
+
+        this.shopState.isLoadingMore = true;
+        this.shopState.currentPage++;
+
+        const loadMore = document.getElementById('shop-load-more');
+        if (loadMore) {
+            loadMore.classList.remove('hidden');
+        }
+
+        try {
+            const params = new URLSearchParams({
+                page: this.shopState.currentPage,
+                limit: 20,
+                sort: this.shopState.sortBy,
+                account: this.config.ACCOUNT_ID
+            });
+
+            if (this.shopState.searchQuery) {
+                params.append('search', this.shopState.searchQuery);
+            }
+
+            if (this.shopState.selectedCategory) {
+                params.append('category', this.shopState.selectedCategory);
+            }
+
+            const url = `${this.config.BASE_URL}/api/shop-products.php?${params.toString()}`;
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+
+            if (data.success && data.products.length > 0) {
+                this.shopState.products = [...this.shopState.products, ...data.products];
+                this.shopState.hasMore = data.pagination.has_more;
+
+                // Append new products to grid
+                this.appendProducts(data.products);
+            } else {
+                this.shopState.hasMore = false;
+            }
+
+            // Hide load more if no more products
+            if (loadMore && !this.shopState.hasMore) {
+                loadMore.classList.add('hidden');
+            }
+        } catch (error) {
+            console.error('Error loading more products:', error);
+            this.shopState.currentPage--;
+        } finally {
+            this.shopState.isLoadingMore = false;
+        }
+    }
+
+    /**
+     * Render products in grid
+     */
+    renderProducts(reset = true) {
+        const grid = document.getElementById('shop-product-grid');
+        if (!grid) return;
+
+        const products = this.shopState.products;
+
+        if (products.length === 0) {
+            this.renderNoProducts();
+            return;
+        }
+
+        grid.innerHTML = products.map(p => this.renderProductCard(p)).join('');
+    }
+
+    /**
+     * Append products to grid (for infinite scroll)
+     */
+    appendProducts(products) {
+        const grid = document.getElementById('shop-product-grid');
+        if (!grid) return;
+
+        const html = products.map(p => this.renderProductCard(p)).join('');
+        grid.insertAdjacentHTML('beforeend', html);
+    }
+
+    /**
+     * Render a single product card
+     * Requirements: 2.3, 11.1
+     * - Display image, name, price, sale price, badges
+     * - Add Rx badge for prescription products
+     * - Add wishlist heart button
+     * - Click opens modal instead of navigating
+     */
+    renderProductCard(product) {
+        const isOutOfStock = product.stock <= 0;
+        const hasSalePrice = product.sale_price && product.sale_price < product.price;
+        const isPrescription = product.is_prescription || false;
+        const isBestseller = product.is_bestseller || false;
+        const isFeatured = product.is_featured || false;
+        const isFlashSale = product.is_flash_sale || false;
+        const isChoice = product.is_choice || false;
+        const isInWishlist = this.isProductInWishlist(product.id);
+
+        // Calculate discount percentage
+        let discountPercent = 0;
+        if (hasSalePrice) {
+            discountPercent = Math.round((1 - product.sale_price / product.price) * 100);
+        }
+
+        return `
+            <div class="product-card ${isOutOfStock ? 'out-of-stock' : ''} ${isFlashSale ? 'flash-sale' : ''}" data-product-id="${product.id}">
+                <div class="product-card-image-wrapper" onclick="window.liffApp.showProductDetailModal(${product.id})">
+                    <!-- Badges -->
+                    <div class="product-badges">
+                        ${isPrescription ? '<span class="product-badge product-badge-rx">Rx</span>' : ''}
+                        ${isFlashSale ? '<span class="product-badge product-badge-flash"><i class="fas fa-bolt"></i> Flash Sale</span>' : ''}
+                        ${hasSalePrice && !isFlashSale ? `<span class="product-badge product-badge-sale">-${discountPercent}%</span>` : ''}
+                        ${isChoice ? '<span class="product-badge product-badge-choice"><i class="fas fa-award"></i> Choice</span>' : ''}
+                        ${isBestseller ? '<span class="product-badge product-badge-bestseller">ขายดี</span>' : ''}
+                        ${isFeatured && !isFlashSale && !isChoice ? '<span class="product-badge product-badge-featured"><i class="fas fa-thumbs-up"></i></span>' : ''}
+                    </div>
+                    
+                    <!-- Wishlist Button -->
+                    <button class="product-wishlist-btn ${isInWishlist ? 'active' : ''}" 
+                            onclick="event.stopPropagation(); window.liffApp.toggleWishlist(${product.id})">
+                        <i class="${isInWishlist ? 'fas' : 'far'} fa-heart"></i>
+                    </button>
+                    
+                    <!-- Product Image -->
+                    <img src="${product.image_url || this.config.BASE_URL + '/assets/images/image-placeholder.svg'}" 
+                         alt="${product.name}"
+                         class="product-card-image"
+                         loading="lazy"
+                         onerror="this.src='${this.config.BASE_URL}/assets/images/image-placeholder.svg'">
+                </div>
+                
+                <div class="product-card-info">
+                    <h3 class="product-card-name" onclick="window.liffApp.showProductDetailModal(${product.id})">${product.name}</h3>
+                    
+                    <div class="product-card-price">
+                        ${hasSalePrice ? `
+                            <span class="product-price-current product-price-sale ${isFlashSale ? 'flash-price' : ''}">฿${this.formatNumber(product.sale_price)}</span>
+                            <span class="product-price-original">฿${this.formatNumber(product.price)}</span>
+                            ${isFlashSale ? `<span class="product-discount-badge">-${discountPercent}%</span>` : ''}
+                        ` : `
+                            <span class="product-price-current">฿${this.formatNumber(product.price)}</span>
+                        `}
+                    </div>
+                    
+                    <button class="product-add-btn" 
+                            ${isOutOfStock ? 'disabled' : ''}
+                            onclick="window.liffApp.addProductToCart(${product.id})"
+                            data-product-id="${product.id}">
+                        ${isOutOfStock ?
+                '<span>สินค้าหมด</span>' :
+                '<i class="fas fa-cart-plus"></i><span>เพิ่มลงตะกร้า</span>'
+            }
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Add product to cart with AJAX
+     * Requirement 2.4, 12.1 - Check for drug interactions before adding
+     */
+    async addProductToCart(productId) {
+        const btn = document.querySelector(`.product-add-btn[data-product-id="${productId}"]`);
+        if (!btn || btn.classList.contains('adding')) return;
+
+        // Show loading state
+        btn.classList.add('adding');
+        const originalContent = btn.innerHTML;
+        btn.innerHTML = '<div class="btn-spinner"></div>';
+
+        try {
+            // Find product in state or fetch it
+            let product = this.shopState.products.find(p => p.id === productId);
+
+            if (!product) {
+                // Fetch product details if not in state
+                const url = `${this.config.BASE_URL}/api/shop-products.php?product_id=${productId}`;
+                const response = await this.fetchWithRetry(url);
+                const data = await response.json();
+
+                if (!data.success || !data.product) {
+                    throw new Error('Product not found');
+                }
+                product = data.product;
+            }
+
+            // Check if prescription product (Requirement 11.2)
+            if (product.is_prescription && window.PrescriptionHandler) {
+                // Show prescription info modal first
+                window.PrescriptionHandler.showPrescriptionInfoModal(
+                    product,
+                    // onContinue - user acknowledged, proceed with interaction check
+                    (prod) => {
+                        this.proceedWithAddToCart(prod, btn, originalContent);
+                    },
+                    // onCancel - user cancelled
+                    () => {
+                        btn.classList.remove('adding');
+                        btn.innerHTML = originalContent;
+                    }
+                );
+            } else {
+                // Not a prescription product, proceed with interaction check
+                this.proceedWithAddToCart(product, btn, originalContent);
+            }
+
+        } catch (error) {
+            console.error('Error adding to cart:', error);
+            btn.classList.remove('adding');
+            btn.innerHTML = originalContent;
+            this.showToast('ไม่สามารถเพิ่มสินค้าได้', 'error');
+        }
+    }
+
+    /**
+     * Proceed with add to cart after prescription check
+     * @param {Object} product - Product to add
+     * @param {HTMLElement} btn - Add button element
+     * @param {string} originalContent - Original button content
+     */
+    async proceedWithAddToCart(product, btn, originalContent) {
+        // Check for drug interactions (Requirement 12.1)
+        if (window.DrugInteractionChecker) {
+            const cart = window.store?.get('cart') || { items: [] };
+
+            // Use the drug interaction checker to handle the add
+            await window.DrugInteractionChecker.handleAddToCart(
+                product,
+                // onSuccess callback - product can be added
+                (prod, acknowledgedInteractions) => {
+                    this.completeAddToCart(prod, btn, originalContent, acknowledgedInteractions);
+                },
+                // onBlock callback - product is blocked
+                (prod, interactions) => {
+                    btn.classList.remove('adding');
+                    btn.innerHTML = originalContent;
+                    this.showToast('ไม่สามารถเพิ่มสินค้าได้เนื่องจากปฏิกิริยายา', 'warning');
+                }
+            );
+        } else {
+            // No interaction checker available, add directly
+            this.completeAddToCart(product, btn, originalContent);
+        }
+    }
+
+    /**
+     * Complete the add to cart action after interaction check
+     * @param {Object} product - Product to add
+     * @param {HTMLElement} btn - Add button element
+     * @param {string} originalContent - Original button content
+     * @param {Array} acknowledgedInteractions - Any acknowledged interactions
+     */
+    completeAddToCart(product, btn, originalContent, acknowledgedInteractions = []) {
+        // Add to cart
+        window.store?.addToCart(product, 1);
+
+        // If there were acknowledged interactions, store them
+        if (acknowledgedInteractions && acknowledgedInteractions.length > 0) {
+            const cart = window.store?.get('cart');
+            if (cart) {
+                const item = cart.items.find(i => i.product_id === product.id);
+                if (item) {
+                    item.acknowledged_interactions = acknowledgedInteractions.map(i => ({
+                        id: i.id,
+                        drug1: i.drug1,
+                        drug2: i.drug2,
+                        severity: i.severity,
+                        acknowledged_at: new Date().toISOString()
+                    }));
+                    window.store?.set('cart', cart);
+                }
+            }
+        }
+
+        // Show success state
+        btn.classList.remove('adding');
+        btn.classList.add('added');
+        btn.innerHTML = '<i class="fas fa-check"></i><span>เพิ่มแล้ว</span>';
+
+        // Show toast
+        this.showToast('เพิ่มสินค้าลงตะกร้าแล้ว', 'success');
+
+        // Reset button after delay
+        setTimeout(() => {
+            btn.classList.remove('added');
+            btn.innerHTML = originalContent;
+        }, 1500);
+    }
+
+    /**
+     * Show product detail modal (like old liff-product-detail.php)
+     * @param {number} productId - Product ID to show
+     */
+    async showProductDetailModal(productId) {
+        console.log('🛍️ Opening product detail modal for ID:', productId);
+
+        // Create modal if not exists
+        let modal = document.getElementById('product-detail-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'product-detail-modal';
+            modal.className = 'product-detail-modal';
+            document.body.appendChild(modal);
+        }
+
+        // Show loading state
+        modal.innerHTML = `
+            <div class="product-modal-overlay" onclick="window.liffApp.closeProductDetailModal()"></div>
+            <div class="product-modal-content">
+                <div class="product-modal-header">
+                    <button class="product-modal-close" onclick="window.liffApp.closeProductDetailModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="product-modal-body">
+                    <div class="product-modal-loading">
+                        <div class="skeleton" style="width: 100%; aspect-ratio: 1; border-radius: 12px;"></div>
+                        <div class="skeleton" style="height: 24px; width: 80%; margin-top: 16px;"></div>
+                        <div class="skeleton" style="height: 32px; width: 40%; margin-top: 8px;"></div>
+                    </div>
+                </div>
+            </div>
+        `;
+        modal.classList.add('show');
+        document.body.style.overflow = 'hidden';
+
+        try {
+            // Fetch product details
+            const url = `${this.config.BASE_URL}/api/shop-products.php?product_id=${productId}`;
+            console.log('🛍️ Fetching product from:', url);
+            const response = await this.fetchWithRetry(url);
+            const text = await response.text();
+            console.log('🛍️ Product response text:', text.substring(0, 200));
+
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (parseError) {
+                console.error('❌ JSON parse error:', parseError, 'Response:', text);
+                this.showToast('เกิดข้อผิดพลาดในการโหลดข้อมูล', 'error');
+                this.closeProductDetailModal();
+                return;
+            }
+
+            if (data.success && data.product) {
+                this.renderProductDetailModal(data.product);
+            } else {
+                console.warn('⚠️ Product not found:', data);
+                this.showToast('ไม่พบข้อมูลสินค้า', 'error');
+                this.closeProductDetailModal();
+            }
+        } catch (error) {
+            console.error('❌ Error loading product:', error);
+            this.showToast('เกิดข้อผิดพลาด', 'error');
+            this.closeProductDetailModal();
+        }
+    }
+
+    /**
+     * Render product detail modal content
+     * @param {Object} product - Product data
+     */
+    renderProductDetailModal(product) {
+        const modal = document.getElementById('product-detail-modal');
+        if (!modal) return;
+
+        const hasSalePrice = product.sale_price && product.sale_price < product.price;
+        const discountPercent = hasSalePrice ? Math.round((1 - product.sale_price / product.price) * 100) : 0;
+        const isOutOfStock = product.stock <= 0;
+        const isLowStock = product.stock > 0 && product.stock <= 5;
+
+        modal.innerHTML = `
+            <div class="product-modal-overlay" onclick="window.liffApp.closeProductDetailModal()"></div>
+            <div class="product-modal-content">
+                <div class="product-modal-header">
+                    <button class="product-modal-close" onclick="window.liffApp.closeProductDetailModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <button class="product-modal-wishlist" onclick="window.liffApp.toggleWishlist(${product.id})">
+                        <i class="${this.isProductInWishlist(product.id) ? 'fas' : 'far'} fa-heart"></i>
+                    </button>
+                </div>
+                <div class="product-modal-body">
+                    <!-- Product Image -->
+                    <div class="product-modal-image-wrapper">
+                        <img src="${product.image_url || this.config.BASE_URL + '/assets/images/image-placeholder.svg'}" 
+                             alt="${product.name}"
+                             class="product-modal-image"
+                             onerror="this.src='${this.config.BASE_URL}/assets/images/image-placeholder.svg'">
+                        ${hasSalePrice ? `<span class="product-modal-badge sale">-${discountPercent}%</span>` : ''}
+                    </div>
+
+                    <!-- Product Info -->
+                    <div class="product-modal-info">
+                        <h2 class="product-modal-name">${product.name}</h2>
+                        
+                        ${product.generic_name ? `<p class="product-modal-generic">${product.generic_name}</p>` : ''}
+                        
+                        <!-- Price -->
+                        <div class="product-modal-price">
+                            ${hasSalePrice ? `
+                                <span class="price-current sale">฿${this.formatNumber(product.sale_price)}</span>
+                                <span class="price-original">฿${this.formatNumber(product.price)}</span>
+                            ` : `
+                                <span class="price-current">฿${this.formatNumber(product.price)}</span>
+                            `}
+                            ${product.unit ? `<span class="price-unit">/ ${product.unit}</span>` : ''}
+                        </div>
+
+                        <!-- Stock Status -->
+                        <div class="product-modal-stock ${isOutOfStock ? 'out' : isLowStock ? 'low' : 'in'}">
+                            ${isOutOfStock ?
+                '<i class="fas fa-times-circle"></i> สินค้าหมด' :
+                isLowStock ?
+                    `<i class="fas fa-exclamation-circle"></i> เหลือ ${product.stock} ${product.unit || 'ชิ้น'}` :
+                    '<i class="fas fa-check-circle"></i> มีสินค้า'
+            }
+                        </div>
+
+                        ${product.manufacturer ? `
+                            <div class="product-modal-manufacturer">
+                                <i class="fas fa-industry"></i> ${product.manufacturer}
+                            </div>
+                        ` : ''}
+
+                        ${product.usage_instructions ? `
+                            <div class="product-modal-section">
+                                <h3><i class="fas fa-prescription-bottle-alt"></i> วิธีใช้</h3>
+                                <p>${product.usage_instructions}</p>
+                            </div>
+                        ` : ''}
+
+                        ${product.description ? `
+                            <div class="product-modal-section">
+                                <h3><i class="fas fa-info-circle"></i> รายละเอียด</h3>
+                                <p>${product.description}</p>
+                            </div>
+                        ` : ''}
+
+                        ${product.sku ? `
+                            <div class="product-modal-sku">
+                                <span>SKU:</span> ${product.sku}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+
+                <!-- Bottom Actions -->
+                <div class="product-modal-actions">
+                    <div class="product-modal-qty">
+                        <button class="qty-btn" onclick="window.liffApp.changeModalQty(-1)">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <input type="number" id="modal-qty" value="1" min="1" max="${product.stock || 999}" readonly>
+                        <button class="qty-btn" onclick="window.liffApp.changeModalQty(1)">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                    <button class="product-modal-add-btn" 
+                            onclick="window.liffApp.addToCartFromModal(${product.id})"
+                            ${isOutOfStock ? 'disabled' : ''}>
+                        <i class="fas fa-cart-plus"></i>
+                        ${isOutOfStock ? 'สินค้าหมด' : 'เพิ่มลงตะกร้า'}
+                    </button>
+                </div>
+            </div>
+        `;
+
+        // Store current product for qty changes
+        this.currentModalProduct = product;
+    }
+
+    /**
+     * Close product detail modal
+     */
+    closeProductDetailModal() {
+        const modal = document.getElementById('product-detail-modal');
+        if (modal) {
+            modal.classList.remove('show');
+            document.body.style.overflow = '';
+            setTimeout(() => {
+                modal.innerHTML = '';
+            }, 300);
+        }
+        this.currentModalProduct = null;
+    }
+
+    /**
+     * Change quantity in modal
+     * @param {number} delta - Amount to change (+1 or -1)
+     */
+    changeModalQty(delta) {
+        const input = document.getElementById('modal-qty');
+        if (!input || !this.currentModalProduct) return;
+
+        let val = parseInt(input.value) + delta;
+        const max = this.currentModalProduct.stock || 999;
+
+        if (val < 1) val = 1;
+        if (val > max) val = max;
+
+        input.value = val;
+    }
+
+    /**
+     * Add to cart from modal
+     * @param {number} productId - Product ID
+     */
+    async addToCartFromModal(productId) {
+        const qtyInput = document.getElementById('modal-qty');
+        const qty = qtyInput ? parseInt(qtyInput.value) : 1;
+        const btn = document.querySelector('.product-modal-add-btn');
+
+        if (!btn || btn.disabled) return;
+
+        const originalContent = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<div class="btn-spinner"></div>';
+
+        try {
+            const product = this.currentModalProduct;
+            if (!product) throw new Error('Product not found');
+
+            // Add to cart
+            for (let i = 0; i < qty; i++) {
+                window.store?.addToCart(product, 1);
+            }
+
+            // Show success
+            btn.innerHTML = '<i class="fas fa-check"></i> เพิ่มแล้ว';
+            this.showToast(`เพิ่ม ${qty} รายการลงตะกร้าแล้ว`, 'success');
+
+            // Close modal after delay
+            setTimeout(() => {
+                this.closeProductDetailModal();
+            }, 800);
+
+        } catch (error) {
+            console.error('Add to cart error:', error);
+            btn.disabled = false;
+            btn.innerHTML = originalContent;
+            this.showToast('เกิดข้อผิดพลาด', 'error');
+        }
+    }
+
+    /**
+     * Toggle product in wishlist
+     * Requirements: 16.1, 16.2 - Add/remove products from wishlist
+     */
+    async toggleWishlist(productId) {
+        const profile = window.store?.get('profile');
+
+        // Check if logged in
+        if (!profile?.userId) {
+            this.showToast('กรุณาเข้าสู่ระบบเพื่อใช้งานรายการโปรด', 'warning');
+            return;
+        }
+
+        const btn = document.querySelector(`.product-card[data-product-id="${productId}"] .product-wishlist-btn`);
+        const isCurrentlyInWishlist = window.store?.isInWishlist(productId);
+
+        // Optimistic UI update
+        if (btn) {
+            const isActive = btn.classList.toggle('active');
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.className = isActive ? 'fas fa-heart' : 'far fa-heart';
+            }
+        }
+
+        try {
+            // Call API to toggle wishlist
+            const response = await fetch(`${this.config.BASE_URL}/api/wishlist.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'toggle',
+                    line_user_id: profile.userId,
+                    product_id: productId,
+                    line_account_id: this.config.ACCOUNT_ID
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Update local store
+                if (data.is_favorite) {
+                    window.store?.addToWishlist(productId);
+                    this.showToast('เพิ่มในรายการโปรดแล้ว', 'success');
+                } else {
+                    window.store?.removeFromWishlist(productId);
+                    this.showToast('นำออกจากรายการโปรดแล้ว', 'success');
+                }
+            } else {
+                // Revert UI on error
+                this.revertWishlistButton(btn, isCurrentlyInWishlist);
+                this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+            }
+        } catch (error) {
+            console.error('Toggle wishlist error:', error);
+            // Revert UI on error
+            this.revertWishlistButton(btn, isCurrentlyInWishlist);
+            this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+        }
+    }
+
+    /**
+     * Revert wishlist button state
+     */
+    revertWishlistButton(btn, wasInWishlist) {
+        if (btn) {
+            if (wasInWishlist) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+            const icon = btn.querySelector('i');
+            if (icon) {
+                icon.className = wasInWishlist ? 'fas fa-heart' : 'far fa-heart';
+            }
+        }
+    }
+
+    /**
+     * Check if product is in wishlist
+     * Requirements: 16.3 - Display filled heart icon for wishlist items
+     */
+    isProductInWishlist(productId) {
+        return window.store?.isInWishlist(productId) || false;
+    }
+
+    /**
+     * Load wishlist from API
+     * Requirements: 16.4 - Display wishlist page
+     */
+    async loadWishlistFromApi() {
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const response = await fetch(
+                `${this.config.BASE_URL}/api/wishlist.php?action=list&line_user_id=${profile.userId}`
+            );
+            const data = await response.json();
+
+            if (data.success && data.items) {
+                // Extract product IDs and update store
+                const productIds = data.items.map(item => item.product_id);
+                window.store?.setWishlistItems(productIds);
+            }
+        } catch (error) {
+            console.error('Load wishlist error:', error);
+        }
+    }
+
+    /**
+     * Update cart summary bar visibility and content
+     * Requirement 2.5
+     */
+    updateCartSummaryBar() {
+        const bar = document.getElementById('cart-summary-bar');
+        const badge = document.getElementById('cart-summary-badge');
+        const countEl = document.getElementById('cart-summary-count');
+        const totalEl = document.getElementById('cart-summary-total');
+
+        if (!bar) return;
+
+        const cart = window.store?.get('cart') || { items: [], total: 0 };
+        const itemCount = cart.items.reduce((sum, item) => sum + item.quantity, 0);
+        const total = cart.total || cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
+        if (itemCount > 0) {
+            bar.classList.add('visible');
+            if (badge) badge.textContent = itemCount > 99 ? '99+' : itemCount;
+            if (countEl) countEl.textContent = `${itemCount} รายการ`;
+            if (totalEl) totalEl.textContent = `฿${this.formatNumber(total)}`;
+        } else {
+            bar.classList.remove('visible');
+        }
+    }
+
+    /**
+     * Update result count display
+     */
+    updateResultCount(total) {
+        const el = document.getElementById('shop-result-count');
+        if (el) {
+            el.textContent = `พบ ${this.formatNumber(total)} รายการ`;
+        }
+    }
+
+    /**
+     * Show sort modal
+     */
+    showSortModal() {
+        const sortOptions = [
+            { value: 'newest', label: 'ล่าสุด' },
+            { value: 'price_asc', label: 'ราคา: ต่ำ → สูง' },
+            { value: 'price_desc', label: 'ราคา: สูง → ต่ำ' },
+            { value: 'name', label: 'ชื่อ: ก → ฮ' },
+            { value: 'popular', label: 'ยอดนิยม' }
+        ];
+
+        const modalHtml = `
+            <div class="modal">
+                <div class="modal-header">
+                    <h3 class="modal-title">เรียงลำดับ</h3>
+                    <button class="modal-close" onclick="window.liffApp.hideModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="sort-modal-content">
+                    ${sortOptions.map(opt => `
+                        <div class="sort-option ${this.shopState.sortBy === opt.value ? 'active' : ''}" 
+                             onclick="window.liffApp.selectSort('${opt.value}')">
+                            <span class="sort-option-text">${opt.label}</span>
+                            <i class="fas fa-check sort-option-check"></i>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        this.showModal(modalHtml);
+    }
+
+    /**
+     * Select sort option
+     */
+    selectSort(sortValue) {
+        this.shopState.sortBy = sortValue;
+        this.shopState.currentPage = 1;
+
+        // Update sort label
+        const sortLabels = {
+            'newest': 'ล่าสุด',
+            'price_asc': 'ราคา: ต่ำ → สูง',
+            'price_desc': 'ราคา: สูง → ต่ำ',
+            'name': 'ชื่อ: ก → ฮ',
+            'popular': 'ยอดนิยม'
+        };
+
+        const labelEl = document.getElementById('shop-sort-label');
+        if (labelEl) {
+            labelEl.textContent = sortLabels[sortValue] || 'ล่าสุด';
+        }
+
+        this.hideModal();
+        this.loadProducts(true);
+    }
+
+    /**
+     * Show modal
+     */
+    showModal(html) {
+        const container = document.getElementById('modal-container');
+        if (container) {
+            container.innerHTML = html;
+            container.classList.remove('hidden');
+            container.addEventListener('click', (e) => {
+                if (e.target === container) {
+                    this.hideModal();
+                }
+            });
+        }
+    }
+
+    /**
+     * Hide modal
+     */
+    hideModal() {
+        const container = document.getElementById('modal-container');
+        if (container) {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+        }
+    }
+
+    /**
+     * Render no products state
+     */
+    renderNoProducts() {
+        const grid = document.getElementById('shop-product-grid');
+        if (!grid) return;
+
+        grid.innerHTML = `
+            <div class="shop-no-results" style="grid-column: 1 / -1;">
+                <div class="shop-no-results-icon">
+                    <i class="fas fa-search"></i>
+                </div>
+                <h3>ไม่พบสินค้า</h3>
+                <p>ลองค้นหาด้วยคำอื่น หรือเลือกหมวดหมู่อื่น</p>
+                <button class="btn btn-outline" onclick="window.liffApp.clearSearch()">
+                    <i class="fas fa-redo"></i> ล้างการค้นหา
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render product error state
+     */
+    renderProductError() {
+        const grid = document.getElementById('shop-product-grid');
+        if (!grid) return;
+
+        grid.innerHTML = `
+            <div class="shop-no-results" style="grid-column: 1 / -1;">
+                <div class="shop-no-results-icon">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3>เกิดข้อผิดพลาด</h3>
+                <p>ไม่สามารถโหลดสินค้าได้ กรุณาลองใหม่</p>
+                <button class="btn btn-primary" onclick="window.liffApp.loadProducts(true)">
+                    <i class="fas fa-redo"></i> ลองใหม่
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Clear search and filters
+     */
+    clearSearch() {
+        const searchInput = document.getElementById('shop-search-input');
+        const searchClear = document.getElementById('shop-search-clear');
+
+        if (searchInput) searchInput.value = '';
+        if (searchClear) searchClear.classList.remove('visible');
+
+        this.shopState.searchQuery = '';
+        this.shopState.selectedCategory = null;
+        this.shopState.currentPage = 1;
+
+        this.renderCategories();
+        this.loadProducts(true);
+    }
+
+    /**
+     * Render category skeleton
+     */
+    renderCategorySkeleton() {
+        return Array(5).fill(null).map(() =>
+            '<div class="skeleton skeleton-category-pill" style="width: 80px; height: 36px;"></div>'
+        ).join('');
+    }
+
+    /**
+     * Render product skeleton
+     */
+    renderProductSkeleton(count = 6) {
+        return Array(count).fill(null).map(() => `
+            <div class="skeleton-product-card">
+                <div class="skeleton-product-image-wrapper">
+                    <div class="skeleton skeleton-product-image" style="aspect-ratio: 1;"></div>
+                </div>
+                <div class="skeleton-product-info" style="padding: 12px;">
+                    <div class="skeleton skeleton-text" style="height: 14px; margin-bottom: 8px;"></div>
+                    <div class="skeleton skeleton-text" style="height: 14px; width: 70%; margin-bottom: 8px;"></div>
+                    <div class="skeleton skeleton-text" style="height: 18px; width: 50%; margin-bottom: 12px;"></div>
+                    <div class="skeleton skeleton-button" style="height: 36px;"></div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * Render cart page with item list
+     * Requirements: 3.1 - Display cart items with quantity controls
+     * - Show subtotal, discount, shipping, total
+     */
+    renderCartPage() {
+        const cart = window.store?.get('cart') || { items: [], subtotal: 0, discount: 0, shipping: 0, total: 0 };
+
+        // Initialize cart page after render
+        setTimeout(() => {
+            this.setupCartEventListeners();
+            this.loadCartFromServer();
+        }, 100);
+
+        if (cart.items.length === 0) {
+            return `
+                <div class="cart-page">
+                    <div class="cart-header">
+                        <button class="back-btn" onclick="window.router.back()">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h1 class="page-title">ตะกร้าสินค้า</h1>
+                        <div class="header-spacer"></div>
+                    </div>
+                    <div class="empty-state">
+                        <div class="empty-state-icon">
+                            <i class="fas fa-shopping-cart"></i>
+                        </div>
+                        <h2>ตะกร้าว่างเปล่า</h2>
+                        <p class="text-secondary">เริ่มเลือกซื้อสินค้าได้เลย</p>
+                        <button class="btn btn-primary" onclick="window.router.navigate('/shop')">
+                            <i class="fas fa-store"></i> ไปร้านค้า
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // After render, move checkout bar to body for proper fixed positioning
+        setTimeout(() => {
+            const checkoutBar = document.querySelector('.cart-checkout-bar');
+            if (checkoutBar && checkoutBar.parentElement?.classList.contains('cart-page')) {
+                document.body.appendChild(checkoutBar);
+                console.log('🛒 Moved checkout bar to body');
+            }
+        }, 50);
+
+        return `
+            <div class="cart-page">
+                <!-- Header -->
+                <div class="cart-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">ตะกร้าสินค้า</h1>
+                    <button class="cart-clear-btn" onclick="window.liffApp.confirmClearCart()">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
+
+                <!-- Cart Items List -->
+                <div id="cart-items-container" class="cart-items-container">
+                    ${this.renderCartItems(cart.items)}
+                </div>
+
+                <!-- Cart Summary -->
+                <div class="cart-summary-section">
+                    <div class="cart-summary-card">
+                        <h3 class="cart-summary-title">สรุปคำสั่งซื้อ</h3>
+                        
+                        <div class="cart-summary-row">
+                            <span class="cart-summary-label">ยอดรวมสินค้า</span>
+                            <span id="cart-subtotal" class="cart-summary-value">฿${this.formatNumber(cart.subtotal)}</span>
+                        </div>
+                        
+                        <div class="cart-summary-row cart-discount-row ${cart.discount > 0 ? '' : 'hidden'}" id="cart-discount-row">
+                            <span class="cart-summary-label">ส่วนลด</span>
+                            <span id="cart-discount" class="cart-summary-value text-success">-฿${this.formatNumber(cart.discount)}</span>
+                        </div>
+                        
+                        <div class="cart-summary-row">
+                            <span class="cart-summary-label">ค่าจัดส่ง</span>
+                            <span id="cart-shipping" class="cart-summary-value">${cart.shipping > 0 ? '฿' + this.formatNumber(cart.shipping) : 'ฟรี'}</span>
+                        </div>
+                        
+                        <div class="cart-summary-divider"></div>
+                        
+                        <div class="cart-summary-row cart-total-row">
+                            <span class="cart-summary-label">ยอดรวมทั้งหมด</span>
+                            <span id="cart-total" class="cart-summary-total">฿${this.formatNumber(cart.total)}</span>
+                        </div>
+                        
+                        <!-- Prescription Warning -->
+                        ${cart.hasPrescription ? `
+                            <div class="cart-rx-warning">
+                                <i class="fas fa-exclamation-triangle"></i>
+                                <span>มียาที่ต้องปรึกษาเภสัชกรก่อนสั่งซื้อ</span>
+                            </div>
+                        ` : ''}
+                        
+                        <!-- Checkout Button inside summary card -->
+                        <button class="btn btn-primary btn-block cart-checkout-btn-inline" onclick="window.router.navigate('/checkout')" style="margin-top: 16px;">
+                            <span>ดำเนินการสั่งซื้อ</span>
+                            <i class="fas fa-arrow-right" style="margin-left: 8px;"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render cart items list
+     */
+    renderCartItems(items) {
+        if (!items || items.length === 0) {
+            return '<div class="cart-empty-message">ไม่มีสินค้าในตะกร้า</div>';
+        }
+
+        return items.map(item => `
+            <div class="cart-item" data-product-id="${item.product_id}">
+                <div class="cart-item-image">
+                    <img src="${item.image_url || this.config.BASE_URL + '/assets/images/image-placeholder.svg'}" 
+                         alt="${item.name}"
+                         onerror="this.src='${this.config.BASE_URL}/assets/images/image-placeholder.svg'">
+                    ${item.is_prescription ? '<span class="cart-item-rx-badge">Rx</span>' : ''}
+                </div>
+                <div class="cart-item-info">
+                    <h4 class="cart-item-name">${item.name}</h4>
+                    <div class="cart-item-price">
+                        <span class="cart-item-unit-price">฿${this.formatNumber(item.price)}</span>
+                        ${item.original_price && item.original_price > item.price ?
+                `<span class="cart-item-original-price">฿${this.formatNumber(item.original_price)}</span>` : ''}
+                    </div>
+                    <div class="cart-item-subtotal">
+                        รวม: <strong>฿${this.formatNumber(item.price * item.quantity)}</strong>
+                    </div>
+                </div>
+                <div class="cart-item-actions">
+                    <button class="cart-item-remove" onclick="window.liffApp.removeCartItem(${item.product_id})">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                    <div class="cart-qty-control">
+                        <button class="cart-qty-btn cart-qty-minus" 
+                                onclick="window.liffApp.updateCartItemQty(${item.product_id}, ${item.quantity - 1})"
+                                ${item.quantity <= 1 ? 'disabled' : ''}>
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <span class="cart-qty-value">${item.quantity}</span>
+                        <button class="cart-qty-btn cart-qty-plus" 
+                                onclick="window.liffApp.updateCartItemQty(${item.product_id}, ${item.quantity + 1})">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    /**
+     * Setup cart page event listeners
+     */
+    setupCartEventListeners() {
+        // Prevent duplicate subscriptions
+        if (this._cartListenersSetup) return;
+        this._cartListenersSetup = true;
+
+        // Subscribe to cart changes
+        if (window.store) {
+            window.store.subscribe('cart', () => {
+                this.refreshCartDisplay();
+            });
+        }
+    }
+
+    /**
+     * Load cart from server (sync with backend)
+     */
+    async loadCartFromServer() {
+        // Prevent duplicate/rapid calls
+        if (this._loadingCart) return;
+        this._loadingCart = true;
+
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) {
+            this._loadingCart = false;
+            // Use local cart if not logged in
+            this.refreshCartDisplay();
+            return;
+        }
+
+        try {
+            const url = `${this.config.BASE_URL}/api/checkout.php?action=cart&line_user_id=${profile.userId}`;
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+
+            if (data.success && data.items && data.items.length > 0) {
+                // Update store with server cart data
+                const cart = window.store.get('cart');
+                cart.items = data.items.map(item => ({
+                    product_id: item.product_id,
+                    name: item.name,
+                    price: parseFloat(item.sale_price || item.price),
+                    original_price: parseFloat(item.price),
+                    quantity: parseInt(item.quantity),
+                    image_url: item.image_url,
+                    is_prescription: item.is_prescription || false
+                }));
+                cart.subtotal = parseFloat(data.subtotal || 0);
+                cart.shipping = parseFloat(data.shipping_fee || 0);
+                cart.total = parseFloat(data.total || 0);
+                cart.hasPrescription = cart.items.some(item => item.is_prescription);
+
+                window.store.set('cart', cart);
+            }
+            // If server returns empty, keep local cart (don't overwrite)
+            this.refreshCartDisplay();
+        } catch (error) {
+            console.error('Error loading cart from server:', error);
+            // On error, just display local cart
+            this.refreshCartDisplay();
+        } finally {
+            this._loadingCart = false;
+        }
+    }
+
+    /**
+     * Refresh cart display
+     */
+    refreshCartDisplay() {
+        // Prevent infinite loop
+        if (this._refreshingCart) return;
+
+        const cart = window.store?.get('cart') || { items: [], subtotal: 0, discount: 0, shipping: 0, total: 0 };
+
+        console.log('🛒 refreshCartDisplay:', { itemCount: cart.items?.length, subtotal: cart.subtotal });
+
+        // Check if we're on cart page and have the container
+        const itemsContainer = document.getElementById('cart-items-container');
+        const cartPage = document.querySelector('.cart-page');
+        const currentPage = window.store?.get('currentPage');
+
+        console.log('🛒 Elements found:', {
+            hasItemsContainer: !!itemsContainer,
+            cartPageExists: !!cartPage,
+            currentPage: currentPage
+        });
+
+        // Only re-render if we're on cart page but missing container
+        if (currentPage === 'cart' && cart.items?.length > 0 && !itemsContainer && !cartPage) {
+            console.log('🛒 Cart has items but no container, re-rendering page');
+            this._refreshingCart = true;
+            const contentEl = document.getElementById('app-content');
+            if (contentEl) {
+                contentEl.innerHTML = this.renderCartPage();
+                setTimeout(() => {
+                    this.setupCartEventListeners();
+                    this._refreshingCart = false;
+                }, 100);
+            } else {
+                this._refreshingCart = false;
+            }
+            return;
+        }
+
+        // Update items container
+        if (itemsContainer) {
+            itemsContainer.innerHTML = this.renderCartItems(cart.items);
+        }
+
+        // Update summary values
+        const subtotalEl = document.getElementById('cart-subtotal');
+        const discountEl = document.getElementById('cart-discount');
+        const discountRow = document.getElementById('cart-discount-row');
+        const shippingEl = document.getElementById('cart-shipping');
+        const totalEl = document.getElementById('cart-total');
+
+        if (subtotalEl) subtotalEl.textContent = `฿${this.formatNumber(cart.subtotal)}`;
+        if (discountEl) discountEl.textContent = `-฿${this.formatNumber(cart.discount)}`;
+        if (discountRow) discountRow.classList.toggle('hidden', cart.discount <= 0);
+        if (shippingEl) shippingEl.textContent = cart.shipping > 0 ? `฿${this.formatNumber(cart.shipping)}` : 'ฟรี';
+        if (totalEl) totalEl.textContent = `฿${this.formatNumber(cart.total)}`;
+
+        // Update cart badge
+        this.updateCartBadge();
+    }
+
+    /**
+     * Update cart item quantity
+     */
+    async updateCartItemQty(productId, newQuantity) {
+        if (newQuantity < 1) {
+            this.removeCartItem(productId);
+            return;
+        }
+
+        // Update local store
+        window.store?.updateCartQuantity(productId, newQuantity);
+
+        // Sync with server
+        const profile = window.store?.get('profile');
+        if (profile?.userId) {
+            try {
+                await this.fetchWithRetry(`${this.config.BASE_URL}/api/checkout.php`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'update_cart',
+                        line_user_id: profile.userId,
+                        product_id: productId,
+                        quantity: newQuantity
+                    })
+                });
+            } catch (error) {
+                console.error('Error updating cart:', error);
+            }
+        }
+
+        this.refreshCartDisplay();
+    }
+
+    /**
+     * Remove item from cart
+     */
+    async removeCartItem(productId) {
+        // Update local store
+        window.store?.removeFromCart(productId);
+
+        // Sync with server
+        const profile = window.store?.get('profile');
+        if (profile?.userId) {
+            try {
+                await this.fetchWithRetry(`${this.config.BASE_URL}/api/checkout.php`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'remove_from_cart',
+                        line_user_id: profile.userId,
+                        product_id: productId
+                    })
+                });
+            } catch (error) {
+                console.error('Error removing from cart:', error);
+            }
+        }
+
+        this.showToast('นำสินค้าออกจากตะกร้าแล้ว', 'success');
+        this.refreshCartDisplay();
+    }
+
+    /**
+     * Confirm clear cart
+     */
+    confirmClearCart() {
+        const modalHtml = `
+            <div class="modal">
+                <div class="modal-header">
+                    <h3 class="modal-title">ล้างตะกร้า</h3>
+                    <button class="modal-close" onclick="window.liffApp.hideModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-center">คุณต้องการล้างสินค้าทั้งหมดในตะกร้าหรือไม่?</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-ghost" onclick="window.liffApp.hideModal()">ยกเลิก</button>
+                    <button class="btn btn-danger" onclick="window.liffApp.clearCartConfirmed()">ล้างตะกร้า</button>
+                </div>
+            </div>
+        `;
+        this.showModal(modalHtml);
+    }
+
+    /**
+     * Clear cart confirmed
+     */
+    async clearCartConfirmed() {
+        this.hideModal();
+
+        // Clear local store
+        window.store?.clearCart();
+
+        // Sync with server
+        const profile = window.store?.get('profile');
+        if (profile?.userId) {
+            try {
+                await this.fetchWithRetry(`${this.config.BASE_URL}/api/checkout.php`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        action: 'clear_cart',
+                        line_user_id: profile.userId
+                    })
+                });
+            } catch (error) {
+                console.error('Error clearing cart:', error);
+            }
+        }
+
+        this.showToast('ล้างตะกร้าเรียบร้อยแล้ว', 'success');
+        window.router.navigate('/cart', {}, true);
+    }
+
+    /**
+     * Render checkout page - One Page Flow
+     * Requirements: 3.1, 3.2, 3.3, 3.4
+     * - Display all checkout steps in One_Page_Checkout format
+     * - Auto-fill customer name and phone from LINE Profile
+     * - Address input with saved address option
+     * - Payment method selection (Transfer, Card, PromptPay)
+     */
+    renderCheckoutPage() {
+        const cart = window.store?.get('cart') || { items: [], total: 0 };
+        const profile = window.store?.get('profile');
+        const member = window.store?.get('member');
+
+        console.log('🛒 renderCheckoutPage cart:', { itemCount: cart.items?.length, total: cart.total });
+
+        // If cart is empty, show message instead of redirect loop
+        if (!cart.items || cart.items.length === 0) {
+            return `
+                <div class="checkout-page">
+                    <div class="checkout-header">
+                        <button class="back-btn" onclick="window.router.navigate('/cart')">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h1 class="page-title">ชำระเงิน</h1>
+                        <div class="header-spacer"></div>
+                    </div>
+                    <div class="empty-state" style="padding: 40px 20px; text-align: center;">
+                        <div class="empty-state-icon" style="font-size: 48px; color: #ccc; margin-bottom: 16px;">
+                            <i class="fas fa-shopping-cart"></i>
+                        </div>
+                        <h2 style="margin-bottom: 8px;">ตะกร้าว่างเปล่า</h2>
+                        <p style="color: #666; margin-bottom: 20px;">กรุณาเพิ่มสินค้าก่อนชำระเงิน</p>
+                        <button class="btn btn-primary" onclick="window.router.navigate('/shop')">
+                            <i class="fas fa-store"></i> ไปร้านค้า
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Check for prescription items that need approval
+        // Requirements: 11.3 - Block checkout for Rx items without approval
+        if (cart.hasPrescription && !cart.prescriptionApprovalId) {
+            // Check prescription approval asynchronously
+            setTimeout(() => this.checkPrescriptionApprovalForCheckout(), 100);
+        } else if (cart.hasPrescription && cart.prescriptionApprovalId) {
+            // Verify existing approval is still valid
+            setTimeout(() => this.verifyPrescriptionApproval(), 100);
+        }
+
+        // Initialize checkout state
+        this.checkoutState = {
+            isSubmitting: false,
+            formValid: false,
+            promoCode: '',
+            promoDiscount: 0,
+            promoError: '',
+            promoLoading: false,
+            selectedPayment: 'transfer',
+            useSavedAddress: false,
+            savedAddress: member?.address || null,
+            prescriptionApproved: !cart.hasPrescription || !!cart.prescriptionApprovalId
+        };
+
+        // Setup event listeners after render
+        setTimeout(() => {
+            this.renderCheckoutSubmitBar();
+            this.setupCheckoutEventListeners();
+            this.autoFillFromProfile();
+            this.validateCheckoutForm();
+        }, 100);
+
+        // Auto-fill values from profile (Requirement 3.2)
+        const displayName = profile?.displayName || member?.first_name || '';
+        const phone = member?.phone || '';
+        const savedAddr = member?.address || {};
+
+        return `
+            <div class="checkout-page">
+                <!-- Header -->
+                <div class="checkout-header">
+                    <button class="back-btn" onclick="window.router.navigate('/cart')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">ชำระเงิน</h1>
+                    <div class="header-spacer"></div>
+                </div>
+
+                <!-- Checkout Form -->
+                <form id="checkout-form" class="checkout-form" onsubmit="return false;">
+                    
+                    <!-- Section 1: Delivery Address (Requirement 3.3) -->
+                    <div class="checkout-section">
+                        <div class="checkout-section-header">
+                            <div class="checkout-section-number">1</div>
+                            <h2 class="checkout-section-title">ที่อยู่จัดส่ง</h2>
+                        </div>
+                        
+                        ${savedAddr.address ? `
+                            <div class="saved-address-option">
+                                <label class="saved-address-checkbox">
+                                    <input type="checkbox" id="use-saved-address" onchange="window.liffApp.toggleSavedAddress()">
+                                    <span class="checkbox-custom"></span>
+                                    <span class="checkbox-label">ใช้ที่อยู่ที่บันทึกไว้</span>
+                                </label>
+                                <div class="saved-address-preview" id="saved-address-preview">
+                                    <p class="saved-address-name">${savedAddr.name || displayName}</p>
+                                    <p class="saved-address-detail">${savedAddr.address || ''} ${savedAddr.subdistrict || ''} ${savedAddr.district || ''} ${savedAddr.province || ''} ${savedAddr.postcode || ''}</p>
+                                    <p class="saved-address-phone">${savedAddr.phone || phone}</p>
+                                </div>
+                            </div>
+                        ` : ''}
+                        
+                        <div id="address-form-fields" class="address-form-fields">
+                            <div class="form-group">
+                                <label class="form-label" for="checkout-name">ชื่อผู้รับ <span class="required">*</span></label>
+                                <input type="text" 
+                                       id="checkout-name" 
+                                       class="form-input" 
+                                       placeholder="ชื่อ-นามสกุล"
+                                       value="${displayName}"
+                                       required>
+                                <span class="form-error" id="error-name"></span>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="checkout-phone">เบอร์โทรศัพท์ <span class="required">*</span></label>
+                                <input type="tel" 
+                                       id="checkout-phone" 
+                                       class="form-input" 
+                                       placeholder="0812345678"
+                                       value="${phone}"
+                                       maxlength="10"
+                                       pattern="[0-9]{10}"
+                                       required>
+                                <span class="form-error" id="error-phone"></span>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label class="form-label" for="checkout-address">ที่อยู่ <span class="required">*</span></label>
+                                <textarea id="checkout-address" 
+                                          class="form-input form-textarea" 
+                                          placeholder="บ้านเลขที่ ซอย ถนน"
+                                          rows="2"
+                                          required>${savedAddr.address || ''}</textarea>
+                                <span class="form-error" id="error-address"></span>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group form-group-half">
+                                    <label class="form-label" for="checkout-subdistrict">แขวง/ตำบล</label>
+                                    <input type="text" 
+                                           id="checkout-subdistrict" 
+                                           class="form-input" 
+                                           placeholder="แขวง/ตำบล"
+                                           value="${savedAddr.subdistrict || ''}">
+                                </div>
+                                <div class="form-group form-group-half">
+                                    <label class="form-label" for="checkout-district">เขต/อำเภอ</label>
+                                    <input type="text" 
+                                           id="checkout-district" 
+                                           class="form-input" 
+                                           placeholder="เขต/อำเภอ"
+                                           value="${savedAddr.district || ''}">
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group form-group-half">
+                                    <label class="form-label" for="checkout-province">จังหวัด <span class="required">*</span></label>
+                                    <input type="text" 
+                                           id="checkout-province" 
+                                           class="form-input" 
+                                           placeholder="จังหวัด"
+                                           value="${savedAddr.province || ''}"
+                                           required>
+                                    <span class="form-error" id="error-province"></span>
+                                </div>
+                                <div class="form-group form-group-half">
+                                    <label class="form-label" for="checkout-postcode">รหัสไปรษณีย์ <span class="required">*</span></label>
+                                    <input type="text" 
+                                           id="checkout-postcode" 
+                                           class="form-input" 
+                                           placeholder="10xxx"
+                                           maxlength="5"
+                                           pattern="[0-9]{5}"
+                                           value="${savedAddr.postcode || ''}"
+                                           required>
+                                    <span class="form-error" id="error-postcode"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Section 2: Payment Method (Requirement 3.4) -->
+                    <div class="checkout-section">
+                        <div class="checkout-section-header">
+                            <div class="checkout-section-number">2</div>
+                            <h2 class="checkout-section-title">วิธีชำระเงิน</h2>
+                        </div>
+                        
+                        <div class="payment-methods">
+                            <label class="payment-method-option active" data-method="transfer">
+                                <input type="radio" name="payment_method" value="transfer" checked>
+                                <div class="payment-method-content">
+                                    <div class="payment-method-icon">
+                                        <i class="fas fa-university"></i>
+                                    </div>
+                                    <div class="payment-method-info">
+                                        <span class="payment-method-name">โอนเงิน</span>
+                                        <span class="payment-method-desc">โอนผ่านธนาคาร</span>
+                                    </div>
+                                    <div class="payment-method-check">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                </div>
+                            </label>
+                            
+                            <label class="payment-method-option" data-method="promptpay">
+                                <input type="radio" name="payment_method" value="promptpay">
+                                <div class="payment-method-content">
+                                    <div class="payment-method-icon promptpay-icon">
+                                        <i class="fas fa-qrcode"></i>
+                                    </div>
+                                    <div class="payment-method-info">
+                                        <span class="payment-method-name">PromptPay QR</span>
+                                        <span class="payment-method-desc">สแกน QR Code</span>
+                                    </div>
+                                    <div class="payment-method-check">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                </div>
+                            </label>
+                            
+                            <label class="payment-method-option" data-method="cod">
+                                <input type="radio" name="payment_method" value="cod">
+                                <div class="payment-method-content">
+                                    <div class="payment-method-icon cod-icon">
+                                        <i class="fas fa-hand-holding-usd"></i>
+                                    </div>
+                                    <div class="payment-method-info">
+                                        <span class="payment-method-name">เก็บเงินปลายทาง</span>
+                                        <span class="payment-method-desc">ชำระเมื่อรับสินค้า</span>
+                                    </div>
+                                    <div class="payment-method-check">
+                                        <i class="fas fa-check-circle"></i>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Section 3: Promo Code -->
+                    <div class="checkout-section">
+                        <div class="checkout-section-header">
+                            <div class="checkout-section-number">3</div>
+                            <h2 class="checkout-section-title">โค้ดส่วนลด</h2>
+                        </div>
+                        
+                        <div class="promo-code-input">
+                            <input type="text" 
+                                   id="promo-code" 
+                                   class="form-input promo-input" 
+                                   placeholder="กรอกโค้ดส่วนลด">
+                            <button type="button" 
+                                    id="apply-promo-btn" 
+                                    class="btn btn-outline promo-btn"
+                                    onclick="window.liffApp.applyPromoCode()">
+                                ใช้โค้ด
+                            </button>
+                        </div>
+                        <div id="promo-result" class="promo-result"></div>
+                    </div>
+
+                    <!-- Section 4: Order Summary -->
+                    <div class="checkout-section">
+                        <div class="checkout-section-header">
+                            <div class="checkout-section-number">4</div>
+                            <h2 class="checkout-section-title">สรุปคำสั่งซื้อ</h2>
+                        </div>
+                        
+                        <div class="checkout-items-summary">
+                            ${cart.items.map(item => `
+                                <div class="checkout-item">
+                                    <div class="checkout-item-image">
+                                        <img src="${item.image_url || this.config.BASE_URL + '/assets/images/image-placeholder.svg'}" 
+                                             alt="${item.name}">
+                                        ${item.is_prescription ? '<span class="checkout-item-rx">Rx</span>' : ''}
+                                    </div>
+                                    <div class="checkout-item-info">
+                                        <span class="checkout-item-name">${item.name}</span>
+                                        <span class="checkout-item-qty">x${item.quantity}</span>
+                                    </div>
+                                    <span class="checkout-item-price">฿${this.formatNumber(item.price * item.quantity)}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        
+                        <div class="checkout-totals">
+                            <div class="checkout-total-row">
+                                <span>ยอดรวมสินค้า (${cart.items.reduce((sum, i) => sum + i.quantity, 0)} ชิ้น)</span>
+                                <span id="checkout-subtotal">฿${this.formatNumber(cart.subtotal)}</span>
+                            </div>
+                            <div class="checkout-total-row promo-discount-row hidden" id="checkout-promo-row">
+                                <span>ส่วนลดโค้ด</span>
+                                <span id="checkout-promo-discount" class="text-success">-฿0</span>
+                            </div>
+                            <div class="checkout-total-row">
+                                <span>ค่าจัดส่ง</span>
+                                <span id="checkout-shipping">${cart.shipping > 0 ? '฿' + this.formatNumber(cart.shipping) : 'ฟรี'}</span>
+                            </div>
+                            <div class="checkout-total-row checkout-grand-total">
+                                <span>ยอดรวมทั้งหมด</span>
+                                <span id="checkout-grand-total">฿${this.formatNumber(cart.total)}</span>
+                            </div>
+                        </div>
+                        
+                        ${cart.hasPrescription ? `
+                            <div class="checkout-rx-notice">
+                                <i class="fas fa-info-circle"></i>
+                                <span>มียาที่ต้องได้รับการอนุมัติจากเภสัชกร ทางร้านจะติดต่อกลับเพื่อยืนยันก่อนจัดส่ง</span>
+                            </div>
+                        ` : ''}
+                    </div>
+                </form>
+            </div>
+        `;
+    }
+
+    /**
+     * Render checkout submit bar (appended to body for fixed positioning)
+     */
+    renderCheckoutSubmitBar() {
+        // Remove existing bar if any
+        const existingBar = document.getElementById('checkout-submit-bar-fixed');
+        if (existingBar) existingBar.remove();
+
+        const bar = document.createElement('div');
+        bar.id = 'checkout-submit-bar-fixed';
+        bar.className = 'checkout-submit-bar-fixed';
+        bar.innerHTML = `
+            <button type="button" 
+                    id="place-order-btn" 
+                    class="btn btn-primary btn-block checkout-submit-btn"
+                    onclick="window.liffApp.placeOrder()"
+                    disabled>
+                <span id="place-order-text">สั่งซื้อ</span>
+                <span id="place-order-loading" class="hidden">
+                    <div class="btn-spinner"></div>
+                    กำลังดำเนินการ...
+                </span>
+            </button>
+        `;
+        document.body.appendChild(bar);
+    }
+
+    /**
+     * Remove checkout submit bar
+     */
+    removeCheckoutSubmitBar() {
+        const bar = document.getElementById('checkout-submit-bar-fixed');
+        if (bar) bar.remove();
+    }
+
+    /**
+     * Setup checkout event listeners
+     */
+    setupCheckoutEventListeners() {
+        // Form input validation on change
+        const inputs = document.querySelectorAll('#checkout-form .form-input');
+        inputs.forEach(input => {
+            input.addEventListener('input', () => this.validateCheckoutForm());
+            input.addEventListener('blur', () => this.validateField(input));
+        });
+
+        // Payment method selection
+        const paymentOptions = document.querySelectorAll('.payment-method-option');
+        paymentOptions.forEach(option => {
+            option.addEventListener('click', () => {
+                paymentOptions.forEach(o => o.classList.remove('active'));
+                option.classList.add('active');
+                option.querySelector('input').checked = true;
+                this.checkoutState.selectedPayment = option.dataset.method;
+            });
+        });
+    }
+
+    /**
+     * Auto-fill form from LINE profile and last order address
+     * Requirement 3.2
+     */
+    autoFillFromProfile() {
+        const profile = window.store?.get('profile');
+        const member = window.store?.get('member');
+
+        if (profile?.displayName) {
+            const nameInput = document.getElementById('checkout-name');
+            if (nameInput && !nameInput.value) {
+                nameInput.value = profile.displayName;
+            }
+        }
+
+        if (member?.phone) {
+            const phoneInput = document.getElementById('checkout-phone');
+            if (phoneInput && !phoneInput.value) {
+                phoneInput.value = member.phone;
+            }
+        }
+
+        // Load last delivery address from previous orders
+        this.loadLastAddress();
+    }
+
+    /**
+     * Load last delivery address from previous orders
+     */
+    async loadLastAddress() {
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const baseUrl = window.APP_CONFIG?.BASE_URL || '';
+            const response = await fetch(`${baseUrl}/api/checkout.php?action=last_address&line_user_id=${profile.userId}`);
+            const data = await response.json();
+
+            if (data.success && data.address) {
+                const addr = data.address;
+                console.log('📍 Last address loaded:', addr);
+
+                // Fill form fields if empty
+                const fields = {
+                    'checkout-name': addr.name,
+                    'checkout-phone': addr.phone,
+                    'checkout-address': addr.address,
+                    'checkout-subdistrict': addr.subdistrict,
+                    'checkout-district': addr.district,
+                    'checkout-province': addr.province,
+                    'checkout-postcode': addr.postcode
+                };
+
+                for (const [id, value] of Object.entries(fields)) {
+                    const input = document.getElementById(id);
+                    if (input && !input.value && value) {
+                        input.value = value;
+                    }
+                }
+
+                // Re-validate form
+                this.validateCheckoutForm();
+            }
+        } catch (error) {
+            console.error('Error loading last address:', error);
+        }
+    }
+
+    /**
+     * Toggle saved address
+     */
+    toggleSavedAddress() {
+        const checkbox = document.getElementById('use-saved-address');
+        const formFields = document.getElementById('address-form-fields');
+        const member = window.store?.get('member');
+
+        this.checkoutState.useSavedAddress = checkbox?.checked || false;
+
+        if (this.checkoutState.useSavedAddress && member?.address) {
+            formFields?.classList.add('hidden');
+            // Fill form with saved address
+            const addr = member.address;
+            document.getElementById('checkout-name').value = addr.name || member.first_name || '';
+            document.getElementById('checkout-phone').value = addr.phone || member.phone || '';
+            document.getElementById('checkout-address').value = addr.address || '';
+            document.getElementById('checkout-subdistrict').value = addr.subdistrict || '';
+            document.getElementById('checkout-district').value = addr.district || '';
+            document.getElementById('checkout-province').value = addr.province || '';
+            document.getElementById('checkout-postcode').value = addr.postcode || '';
+        } else {
+            formFields?.classList.remove('hidden');
+        }
+
+        this.validateCheckoutForm();
+    }
+
+    /**
+     * Validate checkout form in real-time
+     * Requirements: 3.5, 3.6, 3.7
+     * - Validate inputs as user types
+     * - Show inline error messages
+     * - Enable/disable Place Order button
+     */
+    validateCheckoutForm() {
+        const fields = {
+            name: document.getElementById('checkout-name'),
+            phone: document.getElementById('checkout-phone'),
+            address: document.getElementById('checkout-address'),
+            province: document.getElementById('checkout-province'),
+            postcode: document.getElementById('checkout-postcode')
+        };
+
+        let isValid = true;
+
+        // Validate each required field
+        for (const [fieldName, input] of Object.entries(fields)) {
+            if (!input) continue;
+
+            const value = input.value.trim();
+            const errorEl = document.getElementById(`error-${fieldName}`);
+            let fieldValid = true;
+            let errorMessage = '';
+
+            switch (fieldName) {
+                case 'name':
+                    if (!value) {
+                        fieldValid = false;
+                        errorMessage = 'กรุณากรอกชื่อผู้รับ';
+                    } else if (value.length < 2) {
+                        fieldValid = false;
+                        errorMessage = 'ชื่อต้องมีอย่างน้อย 2 ตัวอักษร';
+                    }
+                    break;
+
+                case 'phone':
+                    if (!value) {
+                        fieldValid = false;
+                        errorMessage = 'กรุณากรอกเบอร์โทรศัพท์';
+                    } else if (!/^0[0-9]{9}$/.test(value)) {
+                        fieldValid = false;
+                        errorMessage = 'กรุณากรอกเบอร์โทรศัพท์ 10 หลัก';
+                    }
+                    break;
+
+                case 'address':
+                    if (!value) {
+                        fieldValid = false;
+                        errorMessage = 'กรุณากรอกที่อยู่';
+                    } else if (value.length < 10) {
+                        fieldValid = false;
+                        errorMessage = 'กรุณากรอกที่อยู่ให้ครบถ้วน';
+                    }
+                    break;
+
+                case 'province':
+                    if (!value) {
+                        fieldValid = false;
+                        errorMessage = 'กรุณากรอกจังหวัด';
+                    }
+                    break;
+
+                case 'postcode':
+                    if (!value) {
+                        fieldValid = false;
+                        errorMessage = 'กรุณากรอกรหัสไปรษณีย์';
+                    } else if (!/^[0-9]{5}$/.test(value)) {
+                        fieldValid = false;
+                        errorMessage = 'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก';
+                    }
+                    break;
+            }
+
+            // Update field state
+            if (fieldValid) {
+                input.classList.remove('error');
+                if (errorEl) errorEl.textContent = '';
+            } else {
+                isValid = false;
+            }
+        }
+
+        // Update form valid state
+        this.checkoutState.formValid = isValid;
+
+        // Enable/disable submit button (Requirement 3.6, 3.7)
+        const submitBtn = document.getElementById('place-order-btn');
+        if (submitBtn) {
+            submitBtn.disabled = !isValid;
+        }
+
+        return isValid;
+    }
+
+    /**
+     * Validate single field on blur
+     * @param {HTMLInputElement} input - Input element to validate
+     */
+    validateField(input) {
+        if (!input) return;
+
+        const fieldName = input.id.replace('checkout-', '');
+        const value = input.value.trim();
+        const errorEl = document.getElementById(`error-${fieldName}`);
+        let errorMessage = '';
+
+        switch (fieldName) {
+            case 'name':
+                if (!value) {
+                    errorMessage = 'กรุณากรอกชื่อผู้รับ';
+                } else if (value.length < 2) {
+                    errorMessage = 'ชื่อต้องมีอย่างน้อย 2 ตัวอักษร';
+                }
+                break;
+
+            case 'phone':
+                if (!value) {
+                    errorMessage = 'กรุณากรอกเบอร์โทรศัพท์';
+                } else if (!/^0[0-9]{9}$/.test(value)) {
+                    errorMessage = 'กรุณากรอกเบอร์โทรศัพท์ 10 หลัก';
+                }
+                break;
+
+            case 'address':
+                if (!value) {
+                    errorMessage = 'กรุณากรอกที่อยู่';
+                } else if (value.length < 10) {
+                    errorMessage = 'กรุณากรอกที่อยู่ให้ครบถ้วน';
+                }
+                break;
+
+            case 'province':
+                if (!value) {
+                    errorMessage = 'กรุณากรอกจังหวัด';
+                }
+                break;
+
+            case 'postcode':
+                if (!value) {
+                    errorMessage = 'กรุณากรอกรหัสไปรษณีย์';
+                } else if (!/^[0-9]{5}$/.test(value)) {
+                    errorMessage = 'รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก';
+                }
+                break;
+        }
+
+        // Show/hide error
+        if (errorMessage) {
+            input.classList.add('error');
+            if (errorEl) errorEl.textContent = errorMessage;
+        } else {
+            input.classList.remove('error');
+            if (errorEl) errorEl.textContent = '';
+        }
+
+        // Re-validate entire form
+        this.validateCheckoutForm();
+    }
+
+    /**
+     * Get form data for order submission
+     * @returns {Object} - Form data object
+     */
+    getCheckoutFormData() {
+        return {
+            name: document.getElementById('checkout-name')?.value.trim() || '',
+            phone: document.getElementById('checkout-phone')?.value.trim() || '',
+            address: document.getElementById('checkout-address')?.value.trim() || '',
+            subdistrict: document.getElementById('checkout-subdistrict')?.value.trim() || '',
+            district: document.getElementById('checkout-district')?.value.trim() || '',
+            province: document.getElementById('checkout-province')?.value.trim() || '',
+            postcode: document.getElementById('checkout-postcode')?.value.trim() || ''
+        };
+    }
+
+    /**
+     * Place order with loading state
+     * Requirements: 3.8, 3.9, 11.3
+     * - Show loading state on submit
+     * - Prevent duplicate submissions
+     * - Create order via API
+     * - Block if prescription items without approval
+     */
+    async placeOrder() {
+        // Prevent duplicate submissions (Requirement 3.9)
+        if (this.checkoutState.isSubmitting) {
+            console.log('Order submission already in progress');
+            return;
+        }
+
+        // Validate form first
+        if (!this.validateCheckoutForm()) {
+            this.showToast('กรุณากรอกข้อมูลให้ครบถ้วน', 'error');
+            return;
+        }
+
+        // Get cart and validate
+        const cart = window.store?.get('cart');
+        console.log('🛒 placeOrder cart:', cart);
+
+        if (!cart?.items || cart.items.length === 0) {
+            this.showToast('ตะกร้าว่างเปล่า กรุณาเพิ่มสินค้า', 'error');
+            return;
+        }
+
+        // Check prescription approval (Requirement 11.3)
+        if (cart?.hasPrescription) {
+            if (window.PrescriptionHandler) {
+                const checkResult = await window.PrescriptionHandler.canProceedToCheckout(cart);
+                if (!checkResult.canCheckout) {
+                    this.showToast(checkResult.reason || 'ต้องได้รับการอนุมัติจากเภสัชกรก่อน', 'warning');
+                    window.PrescriptionHandler.showCheckoutBlockedModal(
+                        cart,
+                        checkResult,
+                        (items) => this.requestPrescriptionConsultation(items),
+                        () => { }
+                    );
+                    return;
+                }
+            }
+        }
+
+        // Set submitting state
+        this.checkoutState.isSubmitting = true;
+
+        // Show loading state (Requirement 3.8)
+        const submitBtn = document.getElementById('place-order-btn');
+        const submitText = document.getElementById('place-order-text');
+        const submitLoading = document.getElementById('place-order-loading');
+
+        if (submitBtn) submitBtn.disabled = true;
+        if (submitText) submitText.classList.add('hidden');
+        if (submitLoading) submitLoading.classList.remove('hidden');
+
+        try {
+            const profile = window.store?.get('profile');
+            const formData = this.getCheckoutFormData();
+            const paymentMethod = document.querySelector('input[name="payment_method"]:checked')?.value || 'transfer';
+
+            // Prepare cart items for API
+            const cartItems = cart.items.map(item => ({
+                product_id: item.product_id,
+                name: item.name,
+                price: item.price,
+                quantity: item.quantity
+            }));
+
+            // Prepare order data - include cart items directly
+            const orderData = {
+                action: 'create_order',
+                line_user_id: profile?.userId,
+                line_account_id: this.config.ACCOUNT_ID,
+                display_name: profile?.displayName || formData.name,
+                address: formData,
+                payment_method: paymentMethod,
+                coupon_code: this.checkoutState.promoCode || null,
+                prescription_approval_id: cart?.prescriptionApprovalId || null,
+                cart_items: cartItems,
+                subtotal: cart.subtotal,
+                shipping: cart.shipping,
+                total: cart.total
+            };
+
+            console.log('🛒 Sending order:', orderData);
+
+            // Create order via API
+            const response = await this.fetchWithRetry(`${this.config.BASE_URL}/api/checkout.php`, {
+                method: 'POST',
+                body: JSON.stringify(orderData)
+            });
+
+            const result = await response.json();
+            console.log('🛒 Order API response:', result);
+
+            if (result.success) {
+                console.log('🛒 Order created successfully:', result.order_number);
+
+                // Clear cart
+                window.store?.clearCart();
+
+                // Send LIFF message via LiffMessageBridge (with API fallback)
+                console.log('🛒 Checking liffMessageBridge:', !!window.liffMessageBridge);
+                console.log('🛒 isInClient:', typeof liff !== 'undefined' && liff.isInClient ? liff.isInClient() : 'N/A');
+
+                if (window.liffMessageBridge) {
+                    try {
+                        console.log('🛒 Calling sendOrderPlaced with order:', result.order_number);
+                        const msgResult = await window.liffMessageBridge.sendOrderPlaced(result.order_number, {
+                            total: cart.total,
+                            items: cart.items.length
+                        });
+                        console.log('🛒 sendOrderPlaced result:', msgResult);
+
+                        if (msgResult.success) {
+                            console.log('🛒 ✅ Order notification sent via:', msgResult.method);
+                        } else {
+                            console.warn('🛒 ⚠️ Order notification failed:', msgResult.error);
+                        }
+                    } catch (e) {
+                        console.warn('🛒 ❌ Failed to send order message:', e);
+                    }
+                } else {
+                    console.warn('🛒 ⚠️ liffMessageBridge not available');
+                }
+
+                // Show success and navigate to order confirmation
+                this.showOrderConfirmation(result);
+            } else {
+                throw new Error(result.message || 'ไม่สามารถสร้างคำสั่งซื้อได้');
+            }
+
+        } catch (error) {
+            console.error('Order placement error:', error);
+            this.showToast(error.message || 'เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+
+            // Reset button state
+            if (submitBtn) submitBtn.disabled = false;
+            if (submitText) submitText.classList.remove('hidden');
+            if (submitLoading) submitLoading.classList.add('hidden');
+        } finally {
+            this.checkoutState.isSubmitting = false;
+        }
+    }
+
+    /**
+     * Show order confirmation modal/page
+     * @param {Object} orderResult - Order creation result from API
+     */
+    showOrderConfirmation(orderResult) {
+        const paymentMethod = document.querySelector('input[name="payment_method"]:checked')?.value || 'transfer';
+
+        // For transfer/promptpay, show payment instructions
+        if (paymentMethod === 'transfer' || paymentMethod === 'promptpay') {
+            this.showPaymentInstructions(orderResult, paymentMethod);
+        } else {
+            // For COD, show success message
+            this.showOrderSuccess(orderResult);
+        }
+    }
+
+    /**
+     * Show payment instructions modal
+     */
+    showPaymentInstructions(orderResult, paymentMethod) {
+        const modalHtml = `
+            <div class="modal order-success-modal">
+                <div class="modal-header">
+                    <h3 class="modal-title">สั่งซื้อสำเร็จ!</h3>
+                    <button class="modal-close" onclick="window.liffApp.hideModal(); window.router.navigate('/orders');">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="order-success-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <p class="order-success-number">หมายเลขคำสั่งซื้อ: <strong>#${orderResult.order_number}</strong></p>
+                    <p class="order-success-total">ยอดชำระ: <strong>฿${this.formatNumber(orderResult.total)}</strong></p>
+                    
+                    <div class="payment-instructions">
+                        <h4>ขั้นตอนการชำระเงิน</h4>
+                        ${paymentMethod === 'transfer' ? `
+                            <div class="bank-info">
+                                <p><strong>ธนาคารกสิกรไทย</strong></p>
+                                <p>ชื่อบัญชี: บริษัท ร้านยา จำกัด</p>
+                                <p>เลขบัญชี: <span class="bank-account">xxx-x-xxxxx-x</span></p>
+                            </div>
+                        ` : `
+                            <div class="promptpay-info">
+                                <p>สแกน QR Code ด้านล่างเพื่อชำระเงิน</p>
+                                <div class="promptpay-qr">
+                                    <img src="${this.config.BASE_URL}/api/checkout.php?action=promptpay_qr&amount=${orderResult.total}" 
+                                         alt="PromptPay QR"
+                                         onerror="this.style.display='none'">
+                                </div>
+                            </div>
+                        `}
+                        <p class="payment-note">หลังโอนเงินแล้ว กรุณาอัพโหลดสลิปในหน้าออเดอร์</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary btn-block" onclick="window.liffApp.hideModal(); window.router.navigate('/orders');">
+                        ดูคำสั่งซื้อ
+                    </button>
+                </div>
+            </div>
+        `;
+
+        this.showModal(modalHtml);
+    }
+
+    /**
+     * Show order success for COD
+     */
+    showOrderSuccess(orderResult) {
+        const modalHtml = `
+            <div class="modal order-success-modal">
+                <div class="modal-header">
+                    <h3 class="modal-title">สั่งซื้อสำเร็จ!</h3>
+                    <button class="modal-close" onclick="window.liffApp.hideModal(); window.router.navigate('/orders');">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="order-success-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <p class="order-success-number">หมายเลขคำสั่งซื้อ: <strong>#${orderResult.order_number}</strong></p>
+                    <p class="order-success-total">ยอดชำระ: <strong>฿${this.formatNumber(orderResult.total)}</strong></p>
+                    <p class="order-success-method">ชำระเงินปลายทาง (COD)</p>
+                    <p class="order-success-note">คำสั่งซื้อยืนยันแล้ว รอจัดส่ง 1-3 วันทำการ</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary btn-block" onclick="window.liffApp.hideModal(); window.router.navigate('/orders');">
+                        ดูคำสั่งซื้อ
+                    </button>
+                </div>
+            </div>
+        `;
+
+        this.showModal(modalHtml);
+    }
+
+    /**
+     * Apply promo code
+     * Requirements: 17.4, 17.5, 17.6, 17.7
+     * - Add promo code input field
+     * - Validate code via API
+     * - Apply discount or show error
+     */
+    async applyPromoCode() {
+        const promoInput = document.getElementById('promo-code');
+        const promoBtn = document.getElementById('apply-promo-btn');
+        const promoResult = document.getElementById('promo-result');
+
+        const code = promoInput?.value.trim().toUpperCase();
+
+        if (!code) {
+            this.showPromoResult('กรุณากรอกโค้ดส่วนลด', 'error');
+            return;
+        }
+
+        // Prevent duplicate requests
+        if (this.checkoutState.promoLoading) return;
+        this.checkoutState.promoLoading = true;
+
+        // Show loading state
+        if (promoBtn) {
+            promoBtn.disabled = true;
+            promoBtn.innerHTML = '<div class="btn-spinner-sm"></div>';
+        }
+
+        try {
+            const profile = window.store?.get('profile');
+            const cart = window.store?.get('cart');
+
+            // Validate promo code via API (Requirement 17.5)
+            const response = await this.fetchWithRetry(`${this.config.BASE_URL}/api/checkout.php`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    action: 'validate_promo',
+                    code: code,
+                    line_user_id: profile?.userId,
+                    line_account_id: this.config.ACCOUNT_ID,
+                    subtotal: cart.subtotal
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.valid) {
+                // Apply discount (Requirement 17.6)
+                this.checkoutState.promoCode = code;
+                this.checkoutState.promoDiscount = parseFloat(result.discount) || 0;
+                this.checkoutState.promoError = '';
+
+                // Update cart discount
+                const cartObj = window.store.get('cart');
+                cartObj.discount = this.checkoutState.promoDiscount;
+                cartObj.couponCode = code;
+                window.store.recalculateCart(cartObj);
+                window.store.set('cart', cartObj);
+
+                // Update UI
+                this.updateCheckoutTotals();
+                this.showPromoResult(`ใช้โค้ดสำเร็จ! ลด ฿${this.formatNumber(this.checkoutState.promoDiscount)}`, 'success');
+
+                // Disable input after successful apply
+                if (promoInput) promoInput.disabled = true;
+                if (promoBtn) {
+                    promoBtn.textContent = 'ยกเลิก';
+                    promoBtn.onclick = () => this.removePromoCode();
+                }
+            } else {
+                // Show error (Requirement 17.7)
+                this.checkoutState.promoError = result.message || 'โค้ดไม่ถูกต้องหรือหมดอายุ';
+                this.showPromoResult(this.checkoutState.promoError, 'error');
+            }
+
+        } catch (error) {
+            console.error('Promo code validation error:', error);
+            this.showPromoResult('ไม่สามารถตรวจสอบโค้ดได้ กรุณาลองใหม่', 'error');
+        } finally {
+            this.checkoutState.promoLoading = false;
+            if (promoBtn && !this.checkoutState.promoCode) {
+                promoBtn.disabled = false;
+                promoBtn.innerHTML = 'ใช้โค้ด';
+            }
+        }
+    }
+
+    /**
+     * Remove applied promo code
+     */
+    removePromoCode() {
+        const promoInput = document.getElementById('promo-code');
+        const promoBtn = document.getElementById('apply-promo-btn');
+
+        // Clear promo state
+        this.checkoutState.promoCode = '';
+        this.checkoutState.promoDiscount = 0;
+        this.checkoutState.promoError = '';
+
+        // Update cart
+        const cart = window.store.get('cart');
+        cart.discount = 0;
+        cart.couponCode = null;
+        window.store.recalculateCart(cart);
+        window.store.set('cart', cart);
+
+        // Reset UI
+        if (promoInput) {
+            promoInput.value = '';
+            promoInput.disabled = false;
+        }
+        if (promoBtn) {
+            promoBtn.textContent = 'ใช้โค้ด';
+            promoBtn.onclick = () => this.applyPromoCode();
+        }
+
+        this.updateCheckoutTotals();
+        this.showPromoResult('', '');
+    }
+
+    /**
+     * Show promo code result message
+     * @param {string} message - Message to display
+     * @param {string} type - 'success' or 'error'
+     */
+    showPromoResult(message, type) {
+        const promoResult = document.getElementById('promo-result');
+        if (promoResult) {
+            promoResult.textContent = message;
+            promoResult.className = `promo-result ${type}`;
+        }
+    }
+
+    /**
+     * Update checkout totals display
+     */
+    updateCheckoutTotals() {
+        const cart = window.store?.get('cart') || { subtotal: 0, discount: 0, shipping: 0, total: 0 };
+
+        const subtotalEl = document.getElementById('checkout-subtotal');
+        const promoRow = document.getElementById('checkout-promo-row');
+        const promoDiscountEl = document.getElementById('checkout-promo-discount');
+        const shippingEl = document.getElementById('checkout-shipping');
+        const grandTotalEl = document.getElementById('checkout-grand-total');
+
+        if (subtotalEl) subtotalEl.textContent = `฿${this.formatNumber(cart.subtotal)}`;
+
+        if (promoRow && promoDiscountEl) {
+            if (cart.discount > 0) {
+                promoRow.classList.remove('hidden');
+                promoDiscountEl.textContent = `-฿${this.formatNumber(cart.discount)}`;
+            } else {
+                promoRow.classList.add('hidden');
+            }
+        }
+
+        if (shippingEl) {
+            shippingEl.textContent = cart.shipping > 0 ? `฿${this.formatNumber(cart.shipping)}` : 'ฟรี';
+        }
+
+        if (grandTotalEl) {
+            grandTotalEl.textContent = `฿${this.formatNumber(cart.total)}`;
+        }
+    }
+
+    /**
+     * Render orders page
+     * Requirements: 4.1, 4.2, 4.3, 4.4, 4.5, 4.6, 4.7, 19.1, 19.2, 19.3, 19.4
+     * - Display orders in timeline/card view sorted by date descending
+     * - Show status badge with color coding
+     * - Expandable order details
+     * - Re-order functionality
+     * - Delivery tracking
+     */
+    renderOrdersPage() {
+        // Show skeleton loading initially
+        setTimeout(() => this.loadOrders(), 100);
+
+        return `
+            <div class="orders-page">
+                <!-- Header -->
+                <div class="orders-page-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">ออเดอร์ของฉัน</h1>
+                    <div class="header-spacer"></div>
+                </div>
+                
+                <!-- Filter Tabs -->
+                <div class="orders-filter-tabs">
+                    <button class="orders-filter-tab active" data-status="all" onclick="window.liffApp.filterOrders('all')">
+                        ทั้งหมด
+                    </button>
+                    <button class="orders-filter-tab" data-status="pending" onclick="window.liffApp.filterOrders('pending')">
+                        รอดำเนินการ
+                    </button>
+                    <button class="orders-filter-tab" data-status="shipping" onclick="window.liffApp.filterOrders('shipping')">
+                        กำลังจัดส่ง
+                    </button>
+                    <button class="orders-filter-tab" data-status="completed" onclick="window.liffApp.filterOrders('completed')">
+                        สำเร็จ
+                    </button>
+                </div>
+                
+                <!-- Orders List -->
+                <div id="orders-list" class="orders-list">
+                    ${window.Skeleton ? window.Skeleton.orderCards(3) : this.renderOrdersSkeleton()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render orders skeleton loading
+     */
+    renderOrdersSkeleton() {
+        return `
+            <div class="skeleton-order-card">
+                <div class="skeleton-order-header">
+                    <div class="skeleton skeleton-text skeleton-order-id"></div>
+                    <div class="skeleton skeleton-badge skeleton-order-status"></div>
+                </div>
+                <div class="skeleton-order-date">
+                    <div class="skeleton skeleton-text skeleton-date"></div>
+                </div>
+                <div class="skeleton-order-items">
+                    <div class="skeleton-order-item">
+                        <div class="skeleton skeleton-item-image"></div>
+                        <div class="skeleton-item-info">
+                            <div class="skeleton skeleton-text skeleton-item-name"></div>
+                            <div class="skeleton skeleton-text skeleton-item-qty"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="skeleton-order-footer">
+                    <div class="skeleton skeleton-text skeleton-order-total"></div>
+                    <div class="skeleton skeleton-button skeleton-order-action"></div>
+                </div>
+            </div>
+        `.repeat(3);
+    }
+
+    /**
+     * Load orders from API
+     * Requirement 4.1 - Sort by date descending
+     */
+    async loadOrders(status = 'all') {
+        const container = document.getElementById('orders-list');
+        if (!container) return;
+
+        const profile = window.store?.get('profile');
+
+        if (!profile) {
+            container.innerHTML = this.renderOrdersLoginRequired();
+            return;
+        }
+
+        try {
+            const url = `${this.config.BASE_URL}/api/orders.php?action=my_orders&line_user_id=${profile.userId}&line_account_id=${this.config.ACCOUNT_ID}${status !== 'all' ? `&status=${status}` : ''}`;
+
+            const response = await this.fetchWithRetry(url);
+            const data = await response.json();
+
+            if (data.success && data.orders && data.orders.length > 0) {
+                // Sort by date descending (Requirement 4.1)
+                const sortedOrders = data.orders.sort((a, b) => {
+                    return new Date(b.created_at) - new Date(a.created_at);
+                });
+
+                // Store orders for filtering
+                this.currentOrders = sortedOrders;
+
+                container.innerHTML = this.renderOrdersList(sortedOrders);
+            } else {
+                container.innerHTML = this.renderOrdersEmptyState();
+            }
+        } catch (error) {
+            console.error('Error loading orders:', error);
+            container.innerHTML = this.renderOrdersError();
+        }
+    }
+
+    /**
+     * Filter orders by status
+     */
+    filterOrders(status) {
+        // Update active tab
+        document.querySelectorAll('.orders-filter-tab').forEach(tab => {
+            tab.classList.toggle('active', tab.dataset.status === status);
+        });
+
+        // Reload orders with filter
+        this.loadOrders(status);
+    }
+
+    /**
+     * Render orders list
+     */
+    renderOrdersList(orders) {
+        return orders.map(order => this.renderOrderCard(order)).join('');
+    }
+
+    /**
+     * Render single order card
+     * Requirements: 4.2, 4.3, 4.6
+     */
+    renderOrderCard(order) {
+        const orderId = order.order_number || order.order_id || order.id;
+        const status = this.normalizeOrderStatus(order.status);
+        const paymentMethod = order.payment_method || 'transfer';
+
+        // Debug: log payment method
+        console.log(`Order #${orderId}: payment_method=${order.payment_method}, isCOD=${paymentMethod === 'cod'}`);
+
+        // สำหรับ COD ที่ status = confirmed แสดงว่ารอจัดส่ง
+        let statusBadge;
+        if (paymentMethod === 'cod' && status === 'confirmed') {
+            statusBadge = `<span class="order-status-badge confirmed"><i class="fas fa-truck-loading"></i> รอจัดส่ง (COD)</span>`;
+        } else {
+            statusBadge = this.getOrderStatusBadge(status);
+        }
+
+        const date = this.formatOrderDate(order.created_at);
+        const items = order.items || [];
+        const total = parseFloat(order.grand_total || order.total_amount || 0);
+        const itemCount = items.reduce((sum, item) => sum + (parseInt(item.quantity) || 1), 0);
+
+        // Get preview images (max 3)
+        const previewImages = items.slice(0, 3).map(item => item.image || item.image_url || '');
+        const moreCount = items.length > 3 ? items.length - 3 : 0;
+
+        return `
+            <div class="order-card" id="order-${order.id}" data-order-id="${order.id}">
+                <!-- Header with Order Number and Status -->
+                <div class="order-card-header" onclick="window.liffApp.toggleOrderDetails(${order.id})">
+                    <div class="order-card-info">
+                        <div class="order-card-number">#${orderId}</div>
+                        <div class="order-card-date">${date}</div>
+                    </div>
+                    ${statusBadge}
+                </div>
+                
+                <!-- Preview Section -->
+                <div class="order-card-preview" onclick="window.liffApp.toggleOrderDetails(${order.id})">
+                    <div class="order-preview-images">
+                        ${previewImages.map(img => `
+                            <img src="${img || 'assets/images/image-placeholder.svg'}" 
+                                 class="order-preview-image" 
+                                 alt="Product"
+                                 onerror="this.src='assets/images/image-placeholder.svg'">
+                        `).join('')}
+                        ${moreCount > 0 ? `<div class="order-preview-more">+${moreCount}</div>` : ''}
+                    </div>
+                    <div class="order-preview-info">
+                        <div class="order-preview-count">${itemCount} รายการ</div>
+                        <div class="order-preview-total">฿${this.formatNumber(total)}</div>
+                    </div>
+                    <i class="fas fa-chevron-down order-card-expand"></i>
+                </div>
+                
+                <!-- Expandable Details (Requirement 4.3) -->
+                <div class="order-card-details">
+                    <div class="order-details-content">
+                        ${this.renderOrderItems(items)}
+                        ${this.renderOrderSummary(order)}
+                        ${this.renderOrderAddress(order)}
+                        ${this.renderOrderTracking(order)}
+                        ${this.renderOrderActions(order, status)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Toggle order details expansion
+     * Requirement 4.3
+     */
+    toggleOrderDetails(orderId) {
+        const card = document.getElementById(`order-${orderId}`);
+        if (card) {
+            card.classList.toggle('expanded');
+        }
+    }
+
+    /**
+     * Normalize order status to standard values
+     */
+    normalizeOrderStatus(status) {
+        const statusMap = {
+            'pending': 'pending',
+            'รอดำเนินการ': 'pending',
+            'confirmed': 'confirmed',
+            'ยืนยันแล้ว': 'confirmed',
+            'packing': 'packing',
+            'กำลังแพ็ค': 'packing',
+            'shipping': 'shipping',
+            'shipped': 'shipping',
+            'กำลังจัดส่ง': 'shipping',
+            'delivered': 'delivered',
+            'completed': 'completed',
+            'สำเร็จ': 'completed',
+            'cancelled': 'cancelled',
+            'ยกเลิก': 'cancelled'
+        };
+        return statusMap[status?.toLowerCase()] || 'pending';
+    }
+
+    /**
+     * Get order status badge HTML
+     * Requirement 4.2, 4.6 - Status badge with color coding
+     */
+    getOrderStatusBadge(status) {
+        const statusConfig = this.getStatusConfig();
+        const config = statusConfig[status] || statusConfig['pending'];
+
+        return `
+            <span class="order-status-badge ${config.class}">
+                <i class="fas ${config.icon}"></i>
+                ${config.label}
+            </span>
+        `;
+    }
+
+    /**
+     * Get status configuration object
+     * Centralized status config for badge display and updates
+     * Requirement 4.2, 4.6 - Status colors: Yellow=Pending, Blue=Confirmed/Paid, Purple=Shipping, Green=Completed
+     */
+    getStatusConfig() {
+        return {
+            'pending': { label: 'รอยืนยัน', icon: 'fa-clock', class: 'pending' },
+            'confirmed': { label: 'ยืนยันแล้ว', icon: 'fa-check', class: 'confirmed' },
+            'paid': { label: 'ชำระแล้ว', icon: 'fa-credit-card', class: 'paid' },
+            'packing': { label: 'กำลังเตรียม', icon: 'fa-box', class: 'packing' },
+            'processing': { label: 'กำลังเตรียม', icon: 'fa-box', class: 'packing' },
+            'shipping': { label: 'กำลังส่ง', icon: 'fa-truck', class: 'shipping' },
+            'shipped': { label: 'จัดส่งแล้ว', icon: 'fa-truck', class: 'shipping' },
+            'delivered': { label: 'ส่งแล้ว', icon: 'fa-check-circle', class: 'delivered' },
+            'completed': { label: 'สำเร็จ', icon: 'fa-check-circle', class: 'completed' },
+            'cancelled': { label: 'ยกเลิก', icon: 'fa-times-circle', class: 'cancelled' }
+        };
+    }
+
+    /**
+     * Update order status badge dynamically
+     * Requirement 4.6 - Update badge on status change
+     * @param {number|string} orderId - The order ID
+     * @param {string} newStatus - The new status value
+     */
+    updateOrderStatusBadge(orderId, newStatus) {
+        const card = document.getElementById(`order-${orderId}`);
+        if (!card) return false;
+
+        const normalizedStatus = this.normalizeOrderStatus(newStatus);
+        const badge = card.querySelector('.order-status-badge');
+
+        if (badge) {
+            // Remove all status classes
+            const statusClasses = ['pending', 'confirmed', 'paid', 'packing', 'processing', 'shipping', 'shipped', 'delivered', 'completed', 'cancelled'];
+            statusClasses.forEach(cls => badge.classList.remove(cls));
+
+            // Add new status class
+            const statusConfig = this.getStatusConfig();
+            const config = statusConfig[normalizedStatus] || statusConfig['pending'];
+
+            badge.classList.add(config.class);
+            badge.innerHTML = `<i class="fas ${config.icon}"></i> ${config.label}`;
+
+            // Add animation for visual feedback
+            badge.classList.add('status-updated');
+            setTimeout(() => badge.classList.remove('status-updated'), 500);
+
+            // Update the delivery timeline if expanded
+            this.updateOrderTimeline(orderId, normalizedStatus);
+
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Update order timeline when status changes
+     * @param {number|string} orderId - The order ID
+     * @param {string} status - The normalized status
+     */
+    updateOrderTimeline(orderId, status) {
+        const card = document.getElementById(`order-${orderId}`);
+        if (!card) return;
+
+        const timeline = card.querySelector('.delivery-timeline');
+        if (!timeline) return;
+
+        const statusOrder = ['pending', 'confirmed', 'paid', 'packing', 'shipping', 'delivered', 'completed'];
+        const currentIndex = statusOrder.indexOf(status);
+
+        const timelineItems = timeline.querySelectorAll('.timeline-item');
+        timelineItems.forEach((item, index) => {
+            const isCompleted = currentIndex >= index || (status === 'completed' && index <= 5);
+            const isCurrent = currentIndex === index;
+
+            item.classList.toggle('completed', isCompleted);
+            item.classList.toggle('current', isCurrent);
+        });
+    }
+
+    /**
+     * Render order items list
+     */
+    renderOrderItems(items) {
+        if (!items || items.length === 0) return '';
+
+        return `
+            <div class="order-items-section">
+                <div class="order-items-title">รายการสินค้า</div>
+                ${items.map(item => `
+                    <div class="order-item">
+                        <img src="${item.image || item.image_url || 'assets/images/image-placeholder.svg'}" 
+                             class="order-item-image" 
+                             alt="${item.name || item.product_name || 'Product'}"
+                             onerror="this.src='assets/images/image-placeholder.svg'">
+                        <div class="order-item-info">
+                            <div class="order-item-name">${item.name || item.product_name || 'สินค้า'}</div>
+                            <div class="order-item-meta">
+                                <span class="order-item-qty">x${item.quantity || 1}</span>
+                            </div>
+                        </div>
+                        <div class="order-item-price">฿${this.formatNumber(parseFloat(item.price || item.product_price || 0) * (item.quantity || 1))}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Render order summary
+     */
+    renderOrderSummary(order) {
+        const subtotal = parseFloat(order.subtotal || order.total_amount || 0);
+        const discount = parseFloat(order.discount || 0);
+        const shipping = parseFloat(order.shipping_fee || order.shipping || 0);
+        const total = parseFloat(order.grand_total || order.total_amount || 0);
+
+        return `
+            <div class="order-summary-section">
+                <div class="order-summary-row">
+                    <span class="order-summary-label">ยอดรวมสินค้า</span>
+                    <span class="order-summary-value">฿${this.formatNumber(subtotal)}</span>
+                </div>
+                ${discount > 0 ? `
+                    <div class="order-summary-row">
+                        <span class="order-summary-label">ส่วนลด</span>
+                        <span class="order-summary-value text-danger">-฿${this.formatNumber(discount)}</span>
+                    </div>
+                ` : ''}
+                <div class="order-summary-row">
+                    <span class="order-summary-label">ค่าจัดส่ง</span>
+                    <span class="order-summary-value">${shipping > 0 ? `฿${this.formatNumber(shipping)}` : 'ฟรี'}</span>
+                </div>
+                <div class="order-summary-row total">
+                    <span class="order-summary-label">ยอดรวมทั้งหมด</span>
+                    <span class="order-summary-value">฿${this.formatNumber(total)}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render order delivery address
+     */
+    renderOrderAddress(order) {
+        const deliveryInfo = order.delivery_info || {};
+        const address = deliveryInfo.address || order.shipping_address || order.address || '';
+        const name = deliveryInfo.name || order.customer_name || '';
+        const phone = deliveryInfo.phone || order.customer_phone || '';
+
+        if (!address && !name) return '';
+
+        return `
+            <div class="order-address-section">
+                <div class="order-items-title">ที่อยู่จัดส่ง</div>
+                <div class="order-address-card">
+                    <div class="order-address-header">
+                        <div class="order-address-icon">
+                            <i class="fas fa-map-marker-alt"></i>
+                        </div>
+                        <div class="order-address-title">${name || 'ผู้รับ'}</div>
+                    </div>
+                    <div class="order-address-text">
+                        ${phone ? `<div>${phone}</div>` : ''}
+                        ${address}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render order tracking section
+     * Requirements: 19.1, 19.2, 19.3, 19.4
+     */
+    renderOrderTracking(order) {
+        const status = this.normalizeOrderStatus(order.status);
+        const trackingNumber = order.tracking_number || order.delivery_info?.tracking_number;
+        const carrier = order.carrier || order.delivery_info?.carrier || 'ขนส่ง';
+        const isCOD = order.payment_method === 'cod';
+
+        // Debug: log for tracking
+        console.log(`renderOrderTracking: payment_method=${order.payment_method}, isCOD=${isCOD}`);
+
+        // Define timeline stages - แยกตาม payment method
+        let stages;
+        let statusOrder;
+
+        if (isCOD) {
+            // COD: ไม่มีขั้นตอนชำระเงินก่อนจัดส่ง (ชำระตอนรับสินค้า)
+            stages = [
+                { key: 'pending', label: 'สั่งซื้อสำเร็จ', icon: 'fa-shopping-cart' },
+                { key: 'confirmed', label: 'ยืนยันออเดอร์', icon: 'fa-check' },
+                { key: 'packing', label: 'กำลังเตรียมสินค้า', icon: 'fa-box' },
+                { key: 'shipping', label: 'กำลังส่ง', icon: 'fa-truck' },
+                { key: 'delivered', label: 'ส่งแล้ว/ชำระเงิน', icon: 'fa-check-circle' }
+            ];
+            statusOrder = ['pending', 'confirmed', 'packing', 'shipping', 'delivered', 'completed'];
+        } else {
+            // Transfer: มีขั้นตอนชำระเงินก่อน
+            stages = [
+                { key: 'pending', label: 'สั่งซื้อสำเร็จ', icon: 'fa-shopping-cart' },
+                { key: 'confirmed', label: 'ยืนยันออเดอร์', icon: 'fa-check' },
+                { key: 'paid', label: 'ชำระเงินแล้ว', icon: 'fa-credit-card' },
+                { key: 'packing', label: 'กำลังเตรียมสินค้า', icon: 'fa-box' },
+                { key: 'shipping', label: 'กำลังส่ง', icon: 'fa-truck' },
+                { key: 'delivered', label: 'ส่งแล้ว', icon: 'fa-check-circle' }
+            ];
+            statusOrder = ['pending', 'confirmed', 'paid', 'packing', 'shipping', 'delivered', 'completed'];
+        }
+
+        const currentIndex = statusOrder.indexOf(status);
+
+        return `
+            <div class="order-tracking-section">
+                <div class="order-items-title">สถานะการจัดส่ง</div>
+                <div class="order-tracking-card">
+                    ${trackingNumber ? `
+                        <div class="order-tracking-header">
+                            <div class="order-tracking-info">
+                                <div class="order-tracking-icon">
+                                    <i class="fas fa-truck"></i>
+                                </div>
+                                <div>
+                                    <div class="order-tracking-title">${carrier}</div>
+                                    <div class="order-tracking-number">${trackingNumber}</div>
+                                </div>
+                            </div>
+                            <button class="order-tracking-link" onclick="window.liffApp.openTrackingPage('${trackingNumber}', '${carrier}')">
+                                <i class="fas fa-external-link-alt"></i>
+                                ติดตาม
+                            </button>
+                        </div>
+                    ` : ''}
+                    
+                    <!-- Delivery Timeline (Requirement 19.2) -->
+                    <div class="delivery-timeline">
+                        ${stages.map((stage, index) => {
+            const isCompleted = currentIndex >= index || (status === 'completed' && index <= 4);
+            const isCurrent = currentIndex === index;
+            const stageTime = this.getStageTime(order, stage.key);
+
+            return `
+                                <div class="timeline-item ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''}">
+                                    <div class="timeline-dot"></div>
+                                    <div class="timeline-content">
+                                        <div class="timeline-title">${stage.label}</div>
+                                        ${stageTime ? `<div class="timeline-time">${stageTime}</div>` : ''}
+                                    </div>
+                                </div>
+                            `;
+        }).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Get stage timestamp
+     */
+    getStageTime(order, stage) {
+        const timeMap = {
+            'pending': order.created_at,
+            'confirmed': order.confirmed_at,
+            'packing': order.packing_at,
+            'shipping': order.shipped_at,
+            'delivered': order.delivered_at
+        };
+
+        const time = timeMap[stage];
+        return time ? this.formatOrderDateTime(time) : '';
+    }
+
+    /**
+     * Open tracking page
+     * Requirement 19.4 - Link to carrier tracking page
+     */
+    openTrackingPage(trackingNumber, carrier) {
+        const carrierUrls = {
+            'kerry': `https://th.kerryexpress.com/th/track/?track=${trackingNumber}`,
+            'flash': `https://www.flashexpress.co.th/tracking/?se=${trackingNumber}`,
+            'j&t': `https://www.jtexpress.co.th/index/query/gzquery.html?billcode=${trackingNumber}`,
+            'thailand post': `https://track.thailandpost.co.th/?trackNumber=${trackingNumber}`,
+            'ems': `https://track.thailandpost.co.th/?trackNumber=${trackingNumber}`,
+            'ninja van': `https://www.ninjavan.co/th-th/tracking?id=${trackingNumber}`,
+            'best express': `https://www.best-inc.co.th/track?bills=${trackingNumber}`,
+            'scg express': `https://www.scgexpress.co.th/tracking/detail/${trackingNumber}`
+        };
+
+        const carrierLower = carrier.toLowerCase();
+        let url = carrierUrls[carrierLower];
+
+        // Default to Google search if carrier not found
+        if (!url) {
+            url = `https://www.google.com/search?q=${encodeURIComponent(carrier + ' tracking ' + trackingNumber)}`;
+        }
+
+        window.open(url, '_blank');
+    }
+
+    /**
+     * Render order actions
+     * Requirements: 4.4, 4.5 - Re-order functionality
+     */
+    renderOrderActions(order, status) {
+        const canReorder = ['delivered', 'completed'].includes(status);
+        const orderId = order.id || order.order_id;
+
+        return `
+            <div class="order-actions">
+                ${canReorder ? `
+                    <button class="order-action-btn reorder" onclick="window.liffApp.reorderItems('${orderId}')">
+                        <i class="fas fa-redo"></i>
+                        สั่งซื้ออีกครั้ง
+                    </button>
+                ` : ''}
+                <button class="order-action-btn secondary" onclick="window.liffApp.viewOrderDetail('${orderId}')">
+                    <i class="fas fa-eye"></i>
+                    ดูรายละเอียด
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Re-order items from a previous order
+     * Requirements: 4.4, 4.5 - Add all items to cart and navigate to checkout
+     * 
+     * This function:
+     * 1. Finds the order from currentOrders or fetches from API
+     * 2. Adds all items from the order to the cart
+     * 3. Navigates to checkout page
+     */
+    async reorderItems(orderId) {
+        // Try to find order in currentOrders (supports both id and order_id)
+        let order = this.currentOrders?.find(o =>
+            o.id === orderId ||
+            o.order_id === orderId ||
+            String(o.id) === String(orderId)
+        );
+
+        // If not found in currentOrders, try to fetch from API
+        if (!order || !order.items || order.items.length === 0) {
+            try {
+                const profile = window.store?.get('profile');
+                if (profile?.userId) {
+                    const url = `${this.config.BASE_URL}/api/orders.php?action=detail&order_id=${orderId}&line_user_id=${profile.userId}`;
+                    const response = await this.fetchWithRetry(url);
+                    const data = await response.json();
+                    if (data.success && data.order) {
+                        order = data.order;
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching order for reorder:', error);
+            }
+        }
+
+        // Validate order has items
+        if (!order || !order.items || order.items.length === 0) {
+            this.showToast('ไม่พบข้อมูลออเดอร์หรือไม่มีสินค้าในออเดอร์', 'error');
+            return;
+        }
+
+        // Show loading toast
+        this.showToast('กำลังเพิ่มสินค้าลงตะกร้า...', 'info');
+
+        try {
+            let addedCount = 0;
+            let skippedCount = 0;
+
+            // Add each item to cart (Requirement 4.4)
+            for (const item of order.items) {
+                // Validate item has required data
+                const productId = item.product_id || item.id;
+                if (!productId) {
+                    skippedCount++;
+                    continue;
+                }
+
+                const product = {
+                    id: productId,
+                    name: item.name || item.product_name || 'สินค้า',
+                    price: parseFloat(item.price || item.product_price || 0),
+                    image_url: item.image || item.image_url || '',
+                    is_prescription: Boolean(item.is_prescription)
+                };
+
+                const quantity = parseInt(item.quantity) || 1;
+                window.store?.addToCart(product, quantity);
+                addedCount++;
+            }
+
+            // Show success message with count
+            if (addedCount > 0) {
+                this.showToast(`เพิ่ม ${addedCount} รายการลงตะกร้าแล้ว`, 'success');
+
+                // Navigate to checkout (Requirement 4.5)
+                setTimeout(() => {
+                    window.router.navigate('/checkout');
+                }, 500);
+            } else {
+                this.showToast('ไม่สามารถเพิ่มสินค้าได้', 'error');
+            }
+
+        } catch (error) {
+            console.error('Error re-ordering:', error);
+            this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+        }
+    }
+
+    /**
+     * View order detail page
+     */
+    viewOrderDetail(orderId) {
+        window.router.navigate(`/order/${orderId}`);
+    }
+
+    /**
+     * Render empty orders state
+     * Requirement 4.7
+     */
+    renderOrdersEmptyState() {
+        return `
+            <div class="orders-empty-state">
+                <div class="orders-empty-icon">
+                    <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="60" cy="60" r="50" fill="#F1F5F9"/>
+                        <path d="M40 45h40v35H40z" fill="#E2E8F0"/>
+                        <path d="M45 50h30v5H45zM45 60h20v3H45zM45 68h25v3H45z" fill="#CBD5E1"/>
+                        <circle cx="85" cy="75" r="15" fill="#11B0A6"/>
+                        <path d="M80 75h10M85 70v10" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <h2 class="orders-empty-title">ยังไม่มีออเดอร์</h2>
+                <p class="orders-empty-desc">เริ่มช้อปปิ้งเพื่อดูประวัติการสั่งซื้อของคุณที่นี่</p>
+                <button class="btn btn-primary" onclick="window.router.navigate('/shop')">
+                    <i class="fas fa-shopping-bag"></i>
+                    เริ่มช้อปปิ้ง
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render login required state
+     */
+    renderOrdersLoginRequired() {
+        return `
+            <div class="orders-empty-state">
+                <div class="orders-empty-icon">
+                    <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="60" cy="60" r="50" fill="#F1F5F9"/>
+                        <circle cx="60" cy="45" r="15" fill="#E2E8F0"/>
+                        <path d="M35 85c0-14 11-25 25-25s25 11 25 25" fill="#E2E8F0"/>
+                    </svg>
+                </div>
+                <h2 class="orders-empty-title">กรุณาเข้าสู่ระบบ</h2>
+                <p class="orders-empty-desc">เข้าสู่ระบบเพื่อดูประวัติการสั่งซื้อของคุณ</p>
+                <button class="btn btn-primary" onclick="window.liffApp.login()">
+                    <i class="fab fa-line"></i>
+                    เข้าสู่ระบบ LINE
+                </button>
+            </div>
+        `;
+    }
+
+    // ==================== Order Detail Page ====================
+    // Requirements: 19.1, 19.2, 19.3, 19.4 - Delivery Tracking
+
+    /**
+     * Render order detail page with delivery tracking
+     * Requirements: 19.1, 19.2, 19.3, 19.4
+     * - Display delivery timeline (19.2)
+     * - Show tracking number and carrier (19.1, 19.3)
+     * - Link to carrier tracking page (19.4)
+     */
+    renderOrderDetailPage(params) {
+        const orderId = params?.orderId || params?.id;
+
+        if (!orderId) {
+            return this.renderOrderDetailError('ไม่พบหมายเลขออเดอร์');
+        }
+
+        // Load order detail after render
+        setTimeout(() => this.loadOrderDetail(orderId), 100);
+
+        return `
+            <div class="order-detail-page">
+                <!-- Header -->
+                <div class="order-detail-header">
+                    <button class="back-btn" onclick="window.router.navigate('/orders')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">รายละเอียดออเดอร์</h1>
+                    <div class="header-spacer"></div>
+                </div>
+                
+                <!-- Content -->
+                <div id="order-detail-content" class="order-detail-content">
+                    ${this.renderOrderDetailSkeleton()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Load order detail from API
+     */
+    async loadOrderDetail(orderId) {
+        const contentEl = document.getElementById('order-detail-content');
+        if (!contentEl) return;
+
+        try {
+            const profile = window.store?.get('profile');
+            const lineUserId = profile?.userId || '';
+            const lineAccountId = this.config.ACCOUNT_ID || 1;
+
+            const response = await fetch(
+                `${this.config.BASE_URL}/api/checkout.php?action=order&order_id=${orderId}&line_user_id=${lineUserId}&line_account_id=${lineAccountId}`
+            );
+
+            const data = await response.json();
+
+            if (data.success && data.order) {
+                contentEl.innerHTML = this.renderOrderDetailContent(data.order);
+            } else {
+                contentEl.innerHTML = this.renderOrderDetailError(data.message || 'ไม่พบข้อมูลออเดอร์');
+            }
+        } catch (error) {
+            console.error('Error loading order detail:', error);
+            contentEl.innerHTML = this.renderOrderDetailError('ไม่สามารถโหลดข้อมูลได้');
+        }
+    }
+
+    /**
+     * Render order detail content
+     */
+    renderOrderDetailContent(order) {
+        const status = this.normalizeOrderStatus(order.status);
+        const paymentStatus = order.payment_status || 'pending';
+        const allStatusConfig = this.getStatusConfig();
+        const paymentMethod = order.payment_method || 'transfer';
+
+        // สำหรับ COD ที่ status = confirmed แสดงว่ารอจัดส่ง
+        let statusConfig;
+        if (paymentMethod === 'cod' && status === 'confirmed') {
+            statusConfig = { label: 'รอจัดส่ง (COD)', icon: 'fa-truck-loading', class: 'confirmed' };
+        } else {
+            statusConfig = allStatusConfig[status] || allStatusConfig['pending'];
+        }
+
+        const orderNumber = order.order_number || order.order_id || order.id;
+        const items = order.items || [];
+
+        // Check if needs slip upload (transfer/promptpay and not paid)
+        const needsSlipUpload = ['transfer', 'promptpay'].includes(paymentMethod) && paymentStatus === 'pending';
+
+        return `
+            <!-- Order Header Card -->
+            <div class="order-detail-card">
+                <div class="order-detail-order-header">
+                    <div class="order-detail-order-info">
+                        <div class="order-detail-order-number">#${orderNumber}</div>
+                        <div class="order-detail-order-date">${this.formatOrderDate(order.created_at)}</div>
+                    </div>
+                    <span class="order-status-badge ${statusConfig.class}">
+                        <i class="fas ${statusConfig.icon}"></i>
+                        ${statusConfig.label}
+                    </span>
+                </div>
+            </div>
+            
+            <!-- Payment Slip Upload Section -->
+            ${needsSlipUpload ? this.renderSlipUploadSection(order) : ''}
+            
+            <!-- Delivery Tracking Section - Requirements 19.1, 19.2, 19.3, 19.4 -->
+            ${this.renderDeliveryTrackingSection(order)}
+            
+            <!-- Order Items -->
+            <div class="order-detail-card">
+                <div class="order-detail-section-title">รายการสินค้า</div>
+                ${this.renderOrderDetailItems(items)}
+            </div>
+            
+            <!-- Order Summary -->
+            <div class="order-detail-card">
+                <div class="order-detail-section-title">สรุปยอดชำระ</div>
+                ${this.renderOrderDetailSummary(order)}
+            </div>
+            
+            <!-- Shipping Address -->
+            ${this.renderOrderDetailAddress(order)}
+            
+            <!-- Actions -->
+            <div class="order-detail-actions">
+                ${['delivered', 'completed'].includes(status) ? `
+                    <button class="btn btn-primary btn-block" onclick="window.liffApp.reorderItems('${order.id || order.order_id}')">
+                        <i class="fas fa-redo"></i>
+                        สั่งซื้ออีกครั้ง
+                    </button>
+                ` : ''}
+                <button class="btn btn-secondary btn-block" onclick="window.liffApp.contactSupport('${orderNumber}')">
+                    <i class="fas fa-headset"></i>
+                    ติดต่อเรา
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render slip upload section
+     */
+    renderSlipUploadSection(order) {
+        const orderNumber = order.order_number || order.order_id || order.id;
+        const orderId = order.id || order.order_id;
+        const total = parseFloat(order.grand_total || order.total_amount || 0);
+        const paymentMethod = order.payment_method || 'transfer';
+
+        return `
+            <div class="order-detail-card slip-upload-card">
+                <div class="order-detail-section-title">
+                    <i class="fas fa-receipt"></i>
+                    แจ้งชำระเงิน
+                </div>
+                
+                <div class="payment-info-box">
+                    <div class="payment-amount">
+                        <span class="payment-amount-label">ยอดที่ต้องชำระ</span>
+                        <span class="payment-amount-value">฿${this.formatNumber(total)}</span>
+                    </div>
+                    
+                    ${paymentMethod === 'transfer' ? `
+                        <div class="bank-transfer-info">
+                            <div class="bank-info-title">โอนเงินมาที่</div>
+                            <div class="bank-info-row">
+                                <span class="bank-name">ธนาคารกสิกรไทย</span>
+                            </div>
+                            <div class="bank-info-row">
+                                <span class="bank-label">ชื่อบัญชี:</span>
+                                <span class="bank-value">บริษัท ร้านยา จำกัด</span>
+                            </div>
+                            <div class="bank-info-row">
+                                <span class="bank-label">เลขบัญชี:</span>
+                                <span class="bank-value bank-account-number">xxx-x-xxxxx-x</span>
+                                <button class="copy-btn" onclick="window.liffApp.copyToClipboard('xxx-x-xxxxx-x')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="promptpay-info">
+                            <div class="promptpay-qr-container">
+                                <img src="${this.config.BASE_URL}/api/checkout.php?action=promptpay_qr&amount=${total}" 
+                                     alt="PromptPay QR" class="promptpay-qr-image"
+                                     onerror="this.style.display='none'">
+                            </div>
+                            <p class="promptpay-hint">สแกน QR Code เพื่อชำระเงิน</p>
+                        </div>
+                    `}
+                </div>
+                
+                <div class="slip-upload-section">
+                    <div class="slip-upload-title">อัพโหลดหลักฐานการชำระเงิน</div>
+                    
+                    <div class="slip-upload-area" id="slip-upload-area" onclick="document.getElementById('slip-file-input').click()">
+                        <input type="file" id="slip-file-input" accept="image/*" style="display: none;" 
+                               onchange="window.liffApp.handleSlipFileSelect(event, '${orderId}')">
+                        <div class="slip-upload-placeholder" id="slip-upload-placeholder">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <span>แตะเพื่อเลือกรูปสลิป</span>
+                            <span class="slip-upload-hint">รองรับ JPG, PNG ขนาดไม่เกิน 5MB</span>
+                        </div>
+                        <div class="slip-preview" id="slip-preview" style="display: none;">
+                            <img id="slip-preview-image" src="" alt="Preview">
+                            <button class="slip-remove-btn" onclick="event.stopPropagation(); window.liffApp.removeSlipPreview()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-primary btn-block slip-submit-btn" id="slip-submit-btn" 
+                            onclick="window.liffApp.submitSlip('${orderId}')" disabled>
+                        <i class="fas fa-paper-plane"></i>
+                        ส่งหลักฐานการชำระเงิน
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Handle slip file selection
+     */
+    handleSlipFileSelect(event, orderId) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Validate file type
+        if (!file.type.startsWith('image/')) {
+            this.showToast('กรุณาเลือกไฟล์รูปภาพ', 'error');
+            return;
+        }
+
+        // Validate file size (max 5MB)
+        if (file.size > 5 * 1024 * 1024) {
+            this.showToast('ไฟล์ใหญ่เกินไป (สูงสุด 5MB)', 'error');
+            return;
+        }
+
+        // Store file for later upload
+        this._slipFile = file;
+        this._slipOrderId = orderId;
+
+        // Show preview
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const placeholder = document.getElementById('slip-upload-placeholder');
+            const preview = document.getElementById('slip-preview');
+            const previewImage = document.getElementById('slip-preview-image');
+            const submitBtn = document.getElementById('slip-submit-btn');
+
+            if (placeholder) placeholder.style.display = 'none';
+            if (preview) preview.style.display = 'block';
+            if (previewImage) previewImage.src = e.target.result;
+            if (submitBtn) submitBtn.disabled = false;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    /**
+     * Remove slip preview
+     */
+    removeSlipPreview() {
+        this._slipFile = null;
+
+        const placeholder = document.getElementById('slip-upload-placeholder');
+        const preview = document.getElementById('slip-preview');
+        const fileInput = document.getElementById('slip-file-input');
+        const submitBtn = document.getElementById('slip-submit-btn');
+
+        if (placeholder) placeholder.style.display = 'flex';
+        if (preview) preview.style.display = 'none';
+        if (fileInput) fileInput.value = '';
+        if (submitBtn) submitBtn.disabled = true;
+    }
+
+    /**
+     * Submit slip upload
+     */
+    async submitSlip(orderId) {
+        if (!this._slipFile) {
+            this.showToast('กรุณาเลือกรูปสลิป', 'error');
+            return;
+        }
+
+        const submitBtn = document.getElementById('slip-submit-btn');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<div class="btn-spinner"></div> กำลังอัพโหลด...';
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('slip', this._slipFile);
+            formData.append('order_id', orderId);
+            formData.append('action', 'upload_slip');
+
+            const profile = window.store?.get('profile');
+            if (profile?.userId) {
+                formData.append('line_user_id', profile.userId);
+            }
+
+            const response = await fetch(`${this.config.BASE_URL}/api/checkout.php`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showToast('ส่งหลักฐานการชำระเงินสำเร็จ', 'success');
+
+                // Reload order detail
+                setTimeout(() => this.loadOrderDetail(orderId), 1000);
+            } else {
+                throw new Error(result.message || 'ไม่สามารถอัพโหลดได้');
+            }
+        } catch (error) {
+            console.error('Slip upload error:', error);
+            this.showToast(error.message || 'เกิดข้อผิดพลาด', 'error');
+
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fas fa-paper-plane"></i> ส่งหลักฐานการชำระเงิน';
+            }
+        }
+    }
+
+    /**
+     * Copy text to clipboard
+     */
+    copyToClipboard(text) {
+        navigator.clipboard.writeText(text).then(() => {
+            this.showToast('คัดลอกแล้ว', 'success');
+        }).catch(() => {
+            this.showToast('ไม่สามารถคัดลอกได้', 'error');
+        });
+    }
+
+    /**
+     * Render delivery tracking section
+     * Requirements: 19.1, 19.2, 19.3, 19.4
+     */
+    renderDeliveryTrackingSection(order) {
+        const status = this.normalizeOrderStatus(order.status);
+        const trackingNumber = order.tracking_number || order.delivery_info?.tracking_number;
+        const carrier = order.carrier || order.delivery_info?.carrier || 'ขนส่ง';
+        const estimatedDelivery = order.estimated_delivery || order.delivery_info?.estimated_delivery;
+        const isCOD = order.payment_method === 'cod';
+
+        // Define timeline stages with icons - แยกตาม payment method
+        let stages;
+        let statusOrder;
+
+        if (isCOD) {
+            // COD: ไม่มีขั้นตอนชำระเงินก่อนจัดส่ง (ชำระตอนรับสินค้า)
+            stages = [
+                { key: 'pending', label: 'สั่งซื้อสำเร็จ', icon: 'fa-shopping-cart', description: 'ออเดอร์ของคุณได้รับการยืนยันแล้ว' },
+                { key: 'confirmed', label: 'ยืนยันออเดอร์', icon: 'fa-check', description: 'ร้านค้ายืนยันออเดอร์แล้ว' },
+                { key: 'packing', label: 'กำลังเตรียมสินค้า', icon: 'fa-box', description: 'กำลังจัดเตรียมสินค้าของคุณ' },
+                { key: 'shipping', label: 'กำลังส่ง', icon: 'fa-truck', description: 'สินค้าออกจากคลังแล้ว' },
+                { key: 'delivered', label: 'ส่งแล้ว/ชำระเงิน', icon: 'fa-check-circle', description: 'สินค้าถึงมือคุณแล้ว ชำระเงินปลายทาง' }
+            ];
+            statusOrder = ['pending', 'confirmed', 'packing', 'shipping', 'delivered', 'completed'];
+        } else {
+            // Transfer: มีขั้นตอนชำระเงินก่อน
+            stages = [
+                { key: 'pending', label: 'สั่งซื้อสำเร็จ', icon: 'fa-shopping-cart', description: 'ออเดอร์ของคุณได้รับการยืนยันแล้ว' },
+                { key: 'confirmed', label: 'ยืนยันออเดอร์', icon: 'fa-check', description: 'ร้านค้ายืนยันออเดอร์แล้ว' },
+                { key: 'paid', label: 'ชำระเงินแล้ว', icon: 'fa-credit-card', description: 'ชำระเงินเรียบร้อยแล้ว' },
+                { key: 'packing', label: 'กำลังเตรียมสินค้า', icon: 'fa-box', description: 'กำลังจัดเตรียมสินค้าของคุณ' },
+                { key: 'shipping', label: 'กำลังส่ง', icon: 'fa-truck', description: 'สินค้าออกจากคลังแล้ว' },
+                { key: 'delivered', label: 'ส่งแล้ว', icon: 'fa-check-circle', description: 'สินค้าถึงมือคุณแล้ว' }
+            ];
+            statusOrder = ['pending', 'confirmed', 'paid', 'packing', 'shipping', 'delivered', 'completed'];
+        }
+
+        const currentIndex = statusOrder.indexOf(status);
+
+        return `
+            <div class="order-detail-card delivery-tracking-card">
+                <div class="order-detail-section-title">
+                    <i class="fas fa-shipping-fast"></i>
+                    สถานะการจัดส่ง
+                </div>
+                
+                <!-- Tracking Info Header - Requirement 19.1, 19.3 -->
+                ${trackingNumber ? `
+                    <div class="tracking-info-header">
+                        <div class="tracking-carrier-info">
+                            <div class="tracking-carrier-icon">
+                                <i class="fas fa-truck"></i>
+                            </div>
+                            <div class="tracking-carrier-details">
+                                <div class="tracking-carrier-name">${this.escapeHtml(carrier)}</div>
+                                <div class="tracking-number">${this.escapeHtml(trackingNumber)}</div>
+                            </div>
+                        </div>
+                        <!-- Requirement 19.4 - Link to carrier tracking page -->
+                        <button class="tracking-link-btn" onclick="window.liffApp.openTrackingPage('${this.escapeHtml(trackingNumber)}', '${this.escapeHtml(carrier)}')">
+                            <i class="fas fa-external-link-alt"></i>
+                            ติดตามพัสดุ
+                        </button>
+                    </div>
+                ` : status === 'shipping' ? `
+                    <div class="tracking-info-pending">
+                        <i class="fas fa-clock"></i>
+                        <span>กำลังรอข้อมูลการจัดส่ง</span>
+                    </div>
+                ` : ''}
+                
+                <!-- Estimated Delivery -->
+                ${estimatedDelivery && ['shipping', 'packing'].includes(status) ? `
+                    <div class="estimated-delivery">
+                        <i class="fas fa-calendar-alt"></i>
+                        <span>คาดว่าจะได้รับสินค้า: <strong>${this.formatOrderDate(estimatedDelivery)}</strong></span>
+                    </div>
+                ` : ''}
+                
+                <!-- Delivery Timeline - Requirement 19.2 -->
+                <div class="delivery-timeline-detailed">
+                    ${stages.map((stage, index) => {
+            const isCompleted = currentIndex >= index || (status === 'completed' && index <= 4);
+            const isCurrent = currentIndex === index;
+            const stageTime = this.getStageTime(order, stage.key);
+
+            return `
+                            <div class="timeline-stage ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''}">
+                                <div class="timeline-stage-indicator">
+                                    <div class="timeline-stage-dot">
+                                        ${isCompleted ? '<i class="fas fa-check"></i>' : `<i class="fas ${stage.icon}"></i>`}
+                                    </div>
+                                    ${index < stages.length - 1 ? '<div class="timeline-stage-line"></div>' : ''}
+                                </div>
+                                <div class="timeline-stage-content">
+                                    <div class="timeline-stage-title">${stage.label}</div>
+                                    ${stageTime ? `<div class="timeline-stage-time">${stageTime}</div>` : ''}
+                                    ${isCurrent ? `<div class="timeline-stage-desc">${stage.description}</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+        }).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render order detail items
+     */
+    renderOrderDetailItems(items) {
+        if (!items || items.length === 0) {
+            return '<div class="no-items">ไม่มีรายการสินค้า</div>';
+        }
+
+        return `
+            <div class="order-detail-items">
+                ${items.map(item => `
+                    <div class="order-detail-item">
+                        <img src="${item.image || item.image_url || 'assets/images/image-placeholder.svg'}" 
+                             class="order-detail-item-image" 
+                             alt="${item.name || item.product_name || 'Product'}"
+                             onerror="this.src='assets/images/image-placeholder.svg'">
+                        <div class="order-detail-item-info">
+                            <div class="order-detail-item-name">${item.name || item.product_name || 'สินค้า'}</div>
+                            <div class="order-detail-item-qty">จำนวน: ${item.quantity || 1}</div>
+                        </div>
+                        <div class="order-detail-item-price">฿${this.formatNumber(parseFloat(item.price || item.product_price || 0) * (item.quantity || 1))}</div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Render order detail summary
+     */
+    renderOrderDetailSummary(order) {
+        const subtotal = parseFloat(order.subtotal || order.total_amount || 0);
+        const discount = parseFloat(order.discount || 0);
+        const shipping = parseFloat(order.shipping_fee || order.shipping || 0);
+        const total = parseFloat(order.grand_total || order.total_amount || 0);
+
+        return `
+            <div class="order-detail-summary">
+                <div class="summary-row">
+                    <span class="summary-label">ยอดรวมสินค้า</span>
+                    <span class="summary-value">฿${this.formatNumber(subtotal)}</span>
+                </div>
+                ${discount > 0 ? `
+                    <div class="summary-row discount">
+                        <span class="summary-label">ส่วนลด</span>
+                        <span class="summary-value">-฿${this.formatNumber(discount)}</span>
+                    </div>
+                ` : ''}
+                <div class="summary-row">
+                    <span class="summary-label">ค่าจัดส่ง</span>
+                    <span class="summary-value">${shipping > 0 ? `฿${this.formatNumber(shipping)}` : 'ฟรี'}</span>
+                </div>
+                <div class="summary-row total">
+                    <span class="summary-label">ยอดชำระทั้งหมด</span>
+                    <span class="summary-value">฿${this.formatNumber(total)}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render order detail address
+     */
+    renderOrderDetailAddress(order) {
+        const deliveryInfo = order.delivery_info || {};
+        const name = deliveryInfo.name || order.customer_name || '';
+        const phone = deliveryInfo.phone || order.customer_phone || '';
+        const address = deliveryInfo.address || order.shipping_address || '';
+
+        if (!name && !address) return '';
+
+        return `
+            <div class="order-detail-card">
+                <div class="order-detail-section-title">
+                    <i class="fas fa-map-marker-alt"></i>
+                    ที่อยู่จัดส่ง
+                </div>
+                <div class="order-detail-address">
+                    ${name ? `<div class="address-name">${this.escapeHtml(name)}</div>` : ''}
+                    ${phone ? `<div class="address-phone"><i class="fas fa-phone"></i> ${this.escapeHtml(phone)}</div>` : ''}
+                    ${address ? `<div class="address-text">${this.escapeHtml(address)}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render order detail skeleton
+     */
+    renderOrderDetailSkeleton() {
+        return `
+            <div class="order-detail-card">
+                <div class="skeleton-order-detail-header">
+                    <div class="skeleton skeleton-text" style="width: 120px; height: 20px;"></div>
+                    <div class="skeleton skeleton-badge" style="width: 80px; height: 24px;"></div>
+                </div>
+            </div>
+            
+            <div class="order-detail-card">
+                <div class="skeleton skeleton-text" style="width: 100px; height: 16px; margin-bottom: 16px;"></div>
+                <div class="skeleton-timeline">
+                    ${[1, 2, 3, 4, 5].map(() => `
+                        <div class="skeleton-timeline-item">
+                            <div class="skeleton skeleton-circle" style="width: 24px; height: 24px;"></div>
+                            <div class="skeleton skeleton-text" style="width: 80px; height: 14px;"></div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            
+            <div class="order-detail-card">
+                <div class="skeleton skeleton-text" style="width: 100px; height: 16px; margin-bottom: 16px;"></div>
+                ${[1, 2].map(() => `
+                    <div class="skeleton-item-row">
+                        <div class="skeleton skeleton-image" style="width: 60px; height: 60px;"></div>
+                        <div style="flex: 1;">
+                            <div class="skeleton skeleton-text" style="width: 80%; height: 14px; margin-bottom: 8px;"></div>
+                            <div class="skeleton skeleton-text" style="width: 40%; height: 12px;"></div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Render order detail error
+     */
+    renderOrderDetailError(message) {
+        return `
+            <div class="order-detail-error">
+                <div class="error-icon">
+                    <i class="fas fa-exclamation-circle"></i>
+                </div>
+                <h3>เกิดข้อผิดพลาด</h3>
+                <p>${message}</p>
+                <button class="btn btn-primary" onclick="window.router.navigate('/orders')">
+                    <i class="fas fa-arrow-left"></i>
+                    กลับไปหน้าออเดอร์
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Contact support with order number
+     */
+    contactSupport(orderNumber) {
+        // Try to open LINE chat with the shop
+        if (typeof liff !== 'undefined' && liff.isInClient()) {
+            // Send message to LINE OA
+            liff.sendMessages([{
+                type: 'text',
+                text: `สอบถามเกี่ยวกับออเดอร์ #${orderNumber}`
+            }]).then(() => {
+                liff.closeWindow();
+            }).catch(err => {
+                console.error('Error sending message:', err);
+                this.showToast('ไม่สามารถส่งข้อความได้', 'error');
+            });
+        } else {
+            // Fallback - show contact info
+            this.showToast('กรุณาติดต่อผ่าน LINE Official Account', 'info');
+        }
+    }
+
+    /**
+     * Render orders error state
+     */
+    renderOrdersError() {
+        return `
+            <div class="orders-empty-state">
+                <div class="orders-empty-icon">
+                    <svg viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="60" cy="60" r="50" fill="#FEE2E2"/>
+                        <path d="M60 40v25M60 75v5" stroke="#EF4444" stroke-width="4" stroke-linecap="round"/>
+                    </svg>
+                </div>
+                <h2 class="orders-empty-title">เกิดข้อผิดพลาด</h2>
+                <p class="orders-empty-desc">ไม่สามารถโหลดข้อมูลออเดอร์ได้ กรุณาลองใหม่</p>
+                <button class="btn btn-primary" onclick="window.liffApp.loadOrders()">
+                    <i class="fas fa-redo"></i>
+                    ลองใหม่
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Format order date
+     */
+    formatOrderDate(dateStr) {
+        if (!dateStr) return '-';
+        try {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('th-TH', {
+                day: 'numeric',
+                month: 'short',
+                year: 'numeric'
+            });
+        } catch (e) {
+            return dateStr;
+        }
+    }
+
+    /**
+     * Format order date and time
+     */
+    formatOrderDateTime(dateStr) {
+        if (!dateStr) return '';
+        try {
+            const date = new Date(dateStr);
+            return date.toLocaleDateString('th-TH', {
+                day: 'numeric',
+                month: 'short',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+        } catch (e) {
+            return '';
+        }
+    }
+
+    /**
+     * Render profile page (placeholder)
+     */
+    renderProfilePage() {
+        const profile = window.store?.get('profile');
+
+        if (!profile) {
+            return `
+                <div class="profile-page p-4">
+                    <div class="text-center py-8">
+                        <p class="text-secondary mb-4">กรุณาเข้าสู่ระบบ</p>
+                        <button class="btn btn-primary" onclick="window.liffApp.login()">
+                            <i class="fab fa-line"></i> เข้าสู่ระบบ LINE
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="profile-page">
+                <div class="profile-header">
+                    <img src="${profile.pictureUrl || ''}" 
+                         class="profile-avatar"
+                         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2250%22 fill=%22%23ccc%22/></svg>'">
+                    <h2 class="profile-name">${profile.displayName}</h2>
+                </div>
+                
+                <div class="profile-menu">
+                    <div class="profile-menu-item" onclick="window.router.navigate('/member')">
+                        <i class="fas fa-id-card text-primary"></i>
+                        <span>บัตรสมาชิก</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/odoo-link')">
+                        <i class="fas fa-link text-primary"></i>
+                        <span>เชื่อมต่อบัญชี Odoo</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/points')">
+                        <i class="fas fa-coins text-warning"></i>
+                        <span>ประวัติแต้ม</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/redeem')">
+                        <i class="fas fa-gift text-success"></i>
+                        <span>แลกของรางวัล</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/coupons')">
+                        <i class="fas fa-ticket-alt text-info"></i>
+                        <span>คูปองของฉัน</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/wishlist')">
+                        <i class="fas fa-heart text-danger"></i>
+                        <span>รายการโปรด</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/health-profile')">
+                        <i class="fas fa-heartbeat text-danger"></i>
+                        <span>ข้อมูลสุขภาพ</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/medication-reminders')">
+                        <i class="fas fa-pills text-purple"></i>
+                        <span>เตือนทานยา</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/appointments')">
+                        <i class="fas fa-calendar-check text-primary"></i>
+                        <span>นัดหมาย</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/video-call')">
+                        <i class="fas fa-video text-success"></i>
+                        <span>ปรึกษาเภสัชกร</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/symptom')">
+                        <i class="fas fa-stethoscope text-info"></i>
+                        <span>ประเมินอาการ</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/ai-assistant')">
+                        <i class="fas fa-robot text-primary"></i>
+                        <span>ผู้ช่วย AI</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/notifications')">
+                        <i class="fas fa-bell text-warning"></i>
+                        <span>การแจ้งเตือน</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.router.navigate('/settings')">
+                        <i class="fas fa-user-edit text-secondary"></i>
+                        <span>แก้ไขข้อมูลส่วนตัว</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                    <div class="profile-menu-item" onclick="window.liffApp.logout()">
+                        <i class="fas fa-sign-out-alt text-muted"></i>
+                        <span>ออกจากระบบ</span>
+                        <i class="fas fa-chevron-right"></i>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render settings page - Personal info editor
+     */
+    renderSettingsPage() {
+        const profile = window.store?.get('profile');
+
+        if (!profile) {
+            return `
+                <div class="settings-page p-4">
+                    <div class="text-center py-8">
+                        <p class="text-secondary mb-4">กรุณาเข้าสู่ระบบ</p>
+                        <button class="btn btn-primary" onclick="window.liffApp.login()">
+                            <i class="fab fa-line"></i> เข้าสู่ระบบ LINE
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Load user data after render
+        setTimeout(() => this.loadSettingsData(), 100);
+
+        return `
+            <div class="settings-page">
+                <div class="settings-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">แก้ไขข้อมูลส่วนตัว</h1>
+                    <div class="header-spacer"></div>
+                </div>
+
+                <div id="settings-content" class="settings-content">
+                    <div class="settings-loading">
+                        <div class="loading-spinner"></div>
+                        <p>กำลังโหลดข้อมูล...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Load settings data from API
+     */
+    async loadSettingsData() {
+        const container = document.getElementById('settings-content');
+        if (!container) return;
+
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const response = await fetch(
+                `${this.config.BASE_URL}/api/user-profile.php?action=get_personal_info&line_user_id=${profile.userId}`
+            );
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                container.innerHTML = this.renderSettingsForm(result.data);
+            } else {
+                container.innerHTML = this.renderSettingsForm({});
+            }
+        } catch (error) {
+            console.error('Error loading settings:', error);
+            container.innerHTML = this.renderSettingsForm({});
+        }
+    }
+
+    /**
+     * Render settings form
+     */
+    renderSettingsForm(data) {
+        const provinces = [
+            'กรุงเทพมหานคร', 'กระบี่', 'กาญจนบุรี', 'กาฬสินธุ์', 'กำแพงเพชร', 'ขอนแก่น', 'จันทบุรี', 'ฉะเชิงเทรา', 'ชลบุรี', 'ชัยนาท',
+            'ชัยภูมิ', 'ชุมพร', 'เชียงราย', 'เชียงใหม่', 'ตรัง', 'ตราด', 'ตาก', 'นครนายก', 'นครปฐม', 'นครพนม', 'นครราชสีมา', 'นครศรีธรรมราช',
+            'นครสวรรค์', 'นนทบุรี', 'นราธิวาส', 'น่าน', 'บึงกาฬ', 'บุรีรัมย์', 'ปทุมธานี', 'ประจวบคีรีขันธ์', 'ปราจีนบุรี', 'ปัตตานี',
+            'พระนครศรีอยุธยา', 'พังงา', 'พัทลุง', 'พิจิตร', 'พิษณุโลก', 'เพชรบุรี', 'เพชรบูรณ์', 'แพร่', 'ภูเก็ต', 'มหาสารคาม', 'มุกดาหาร',
+            'แม่ฮ่องสอน', 'ยะลา', 'ยโสธร', 'ร้อยเอ็ด', 'ระนอง', 'ระยอง', 'ราชบุรี', 'ลพบุรี', 'ลำปาง', 'ลำพูน', 'เลย', 'ศรีสะเกษ', 'สกลนคร',
+            'สงขลา', 'สตูล', 'สมุทรปราการ', 'สมุทรสงคราม', 'สมุทรสาคร', 'สระแก้ว', 'สระบุรี', 'สิงห์บุรี', 'สุโขทัย', 'สุพรรณบุรี', 'สุราษฎร์ธานี',
+            'สุรินทร์', 'หนองคาย', 'หนองบัวลำภู', 'อ่างทอง', 'อำนาจเจริญ', 'อุดรธานี', 'อุตรดิตถ์', 'อุทัยธานี', 'อุบลราชธานี'
+        ];
+
+        return `
+            <form id="settings-form" class="settings-form" onsubmit="window.liffApp.saveSettings(event)">
+                <div class="settings-section">
+                    <h3 class="settings-section-title"><i class="fas fa-user"></i> ข้อมูลพื้นฐาน</h3>
+                    
+                    <div class="form-group">
+                        <label for="real_name">ชื่อ-นามสกุล</label>
+                        <input type="text" id="real_name" name="real_name" value="${data.real_name || ''}" placeholder="กรอกชื่อ-นามสกุล">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="phone">เบอร์โทรศัพท์</label>
+                        <input type="tel" id="phone" name="phone" value="${data.phone || ''}" placeholder="0812345678" pattern="0[0-9]{8,9}">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="email">อีเมล</label>
+                        <input type="email" id="email" name="email" value="${data.email || ''}" placeholder="example@email.com">
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="birthday">วันเกิด</label>
+                            <input type="date" id="birthday" name="birthday" value="${data.birthday || ''}">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="gender">เพศ</label>
+                            <select id="gender" name="gender">
+                                <option value="">-- เลือก --</option>
+                                <option value="male" ${data.gender === 'male' ? 'selected' : ''}>ชาย</option>
+                                <option value="female" ${data.gender === 'female' ? 'selected' : ''}>หญิง</option>
+                                <option value="other" ${data.gender === 'other' ? 'selected' : ''}>อื่นๆ</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section">
+                    <h3 class="settings-section-title"><i class="fas fa-map-marker-alt"></i> ที่อยู่จัดส่ง</h3>
+                    
+                    <div class="form-group">
+                        <label for="address">ที่อยู่</label>
+                        <textarea id="address" name="address" rows="3" placeholder="บ้านเลขที่ ซอย ถนน ตำบล อำเภอ">${data.address || ''}</textarea>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="province">จังหวัด</label>
+                            <select id="province" name="province">
+                                <option value="">-- เลือกจังหวัด --</option>
+                                ${provinces.map(p => `<option value="${p}" ${data.province === p ? 'selected' : ''}>${p}</option>`).join('')}
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="postal_code">รหัสไปรษณีย์</label>
+                            <input type="text" id="postal_code" name="postal_code" value="${data.postal_code || ''}" placeholder="10110" maxlength="5" pattern="[0-9]{5}">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-actions">
+                    <button type="submit" class="btn btn-primary btn-block" id="save-settings-btn">
+                        <i class="fas fa-save"></i> บันทึกข้อมูล
+                    </button>
+                </div>
+            </form>
+        `;
+    }
+
+    /**
+     * Save settings to API
+     */
+    async saveSettings(event) {
+        event.preventDefault();
+
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) {
+            this.showToast('กรุณาเข้าสู่ระบบ', 'error');
+            return;
+        }
+
+        const form = document.getElementById('settings-form');
+        const saveBtn = document.getElementById('save-settings-btn');
+
+        // Get form data
+        const formData = {
+            action: 'update_personal_info',
+            line_user_id: profile.userId,
+            real_name: form.real_name.value,
+            phone: form.phone.value,
+            email: form.email.value,
+            birthday: form.birthday.value,
+            gender: form.gender.value,
+            address: form.address.value,
+            province: form.province.value,
+            postal_code: form.postal_code.value
+        };
+
+        // Show loading state
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังบันทึก...';
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/user-profile.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showToast('บันทึกข้อมูลเรียบร้อยแล้ว', 'success');
+            } else {
+                this.showToast(result.error || 'เกิดข้อผิดพลาด', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving settings:', error);
+            this.showToast('ไม่สามารถบันทึกข้อมูลได้', 'error');
+        } finally {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="fas fa-save"></i> บันทึกข้อมูล';
+        }
+    }
+
+    /**
+     * Render member page - Full Member Card with QR Code
+     * Requirements: 5.1, 5.2, 5.3, 5.4, 13.2, 13.3
+     */
+    renderMemberPage() {
+        const profile = window.store?.get('profile');
+        const member = window.store?.get('member');
+        const tier = window.store?.get('tier');
+        const companyName = this.config.COMPANY_NAME || this.config.SHOP_NAME || 'ร้านค้า';
+
+        if (!profile) {
+            return `
+                <div class="member-page">
+                    <div class="member-page-header">
+                        <button class="back-btn" onclick="window.router.back()">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h1 class="page-title">บัตรสมาชิก</h1>
+                        <div class="header-spacer"></div>
+                    </div>
+                    <div class="empty-state">
+                        <div class="empty-state-icon">
+                            <i class="fas fa-id-card"></i>
+                        </div>
+                        <h2>กรุณาเข้าสู่ระบบ</h2>
+                        <p class="text-secondary">เข้าสู่ระบบเพื่อดูบัตรสมาชิกของคุณ</p>
+                        <button class="btn btn-primary" onclick="window.liffApp.login()">
+                            <i class="fab fa-line"></i> เข้าสู่ระบบ LINE
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        if (!member) {
+            return `
+                <div class="member-page">
+                    <div class="member-page-header">
+                        <button class="back-btn" onclick="window.router.back()">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h1 class="page-title">บัตรสมาชิก</h1>
+                        <div class="header-spacer"></div>
+                    </div>
+                    <div class="empty-state">
+                        <div class="empty-state-icon">
+                            <i class="fas fa-user-plus"></i>
+                        </div>
+                        <h2>ยังไม่ได้เป็นสมาชิก</h2>
+                        <p class="text-secondary">ลงทะเบียนเพื่อรับสิทธิพิเศษและสะสมแต้ม</p>
+                        <button class="btn btn-primary" onclick="window.router.navigate('/register')">
+                            <i class="fas fa-user-plus"></i> ลงทะเบียนเลย
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Member data
+        const tierName = tier?.name || member.tier || 'Silver';
+
+        // Fix: Use dynamic color with robust fallback
+        let tierColor = tier?.color;
+        if (!tierColor || tierColor === '') {
+            const colors = {
+                'silver': '#C0C0C0',
+                'gold': '#FFD700',
+                'platinum': '#334155',
+                'bronze': '#CD7F32',
+                'vip': '#10B981',
+                'diamond': '#EF4444'
+            };
+            tierColor = colors[String(tierName).toLowerCase()] || '#9CA3AF';
+        }
+        const gradientStyle = `background: linear-gradient(135deg, ${tierColor} 0%, ${tierColor}cc 50%, ${tierColor}99 100%);`;
+        const points = member.points || 0;
+        const nextTierPoints = tier?.next_tier_points || 2000;
+        const currentTierPoints = tier?.current_tier_points || 0;
+        const progressPercent = Math.min(100, Math.max(0, ((points - currentTierPoints) / (nextTierPoints - currentTierPoints)) * 100));
+        const pointsToNext = Math.max(0, nextTierPoints - points);
+        const nextTierName = tier?.next_tier_name || this.getNextTierName(tierName);
+        const memberId = member.member_id || member.id || '-';
+        const memberName = member.first_name || profile.displayName || 'สมาชิก';
+        const expiryDate = member.expiry_date ? this.formatDate(member.expiry_date) : '-';
+
+        // QR Code data (Requirement 5.3)
+        const qrData = `MEMBER-${memberId}`;
+        const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrData)}`;
+
+        return `
+            <div class="member-page">
+                <!-- Header -->
+                <div class="member-page-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">บัตรสมาชิก</h1>
+                    <div class="header-spacer"></div>
+                </div>
+
+                <!-- Welcome Message -->
+                <div class="member-welcome">
+                    <p class="member-welcome-text">ยินดีต้อนรับกลับ, <strong>${memberName}</strong></p>
+                </div>
+
+                <!-- 3D Flip Card -->
+                <div class="member-card-container" onclick="window.liffApp.toggleMemberCard()">
+                    <div id="member-card-flip" class="member-card-flip">
+                        <!-- Front Side (Info) -->
+                        <div class="member-card-face member-card-front" style="${gradientStyle}">
+                            <div class="member-card-decor"></div>
+                            <div class="member-card-decor-2"></div>
+                            
+                            <div class="member-card-content">
+                                <!-- Header Row -->
+                                <div class="member-card-header">
+                                    <div class="member-card-brand">
+                                        <p class="member-card-company">${companyName} Member</p>
+                                        <h2 class="member-card-tier">${tierName} Tier</h2>
+                                    </div>
+                                    <div class="member-card-tier-icon">
+                                        ${this.getTierIcon(tierName)}
+                                    </div>
+                                </div>
+                                
+                                <!-- Info Row -->
+                                <div class="member-card-info">
+                                    <div class="member-card-points">
+                                        <p class="member-card-points-label">คะแนนสะสม</p>
+                                        <p class="member-card-points-value">${this.formatNumber(points)} <span class="member-card-points-unit">pt</span></p>
+                                    </div>
+                                    <div class="member-card-id">
+                                        <p class="member-card-id-label">หมายเลขสมาชิก</p>
+                                        <p class="member-card-id-value">${this.formatMemberId(memberId)}</p>
+                                    </div>
+                                </div>
+                                
+                                <!-- Progress Bar (Requirement 5.4) -->
+                                <div class="member-card-progress">
+                                    <div class="member-card-progress-bar">
+                                        <div class="member-card-progress-fill" style="width: ${progressPercent}%"></div>
+                                    </div>
+                                    <p class="member-card-progress-text">อีก ${this.formatNumber(pointsToNext)} คะแนน เพื่อเลื่อนเป็น ${nextTierName}</p>
+                                </div>
+                                
+                                <!-- Flip Hint -->
+                                <div class="member-card-flip-hint">
+                                    <i class="fas fa-sync-alt"></i>
+                                    <span>แตะเพื่อดู QR Code</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Back Side (QR Code) - Requirement 5.3 -->
+                        <div class="member-card-face member-card-back">
+                            <div class="member-card-qr-content">
+                                <h3 class="member-card-qr-title">QR Code สะสมแต้ม</h3>
+                                <div class="member-card-qr-wrapper">
+                                    <img src="${qrCodeUrl}" alt="QR Code" class="member-card-qr-image" 
+                                         id="member-qr-code" data-member-id="${memberId}">
+                                </div>
+                                <p class="member-card-qr-hint">สแกนที่เคาน์เตอร์เพื่อสะสมแต้ม</p>
+                                <p class="member-card-qr-id">ID: ${this.formatMemberId(memberId)}</p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Card Shadow -->
+                    <div class="member-card-shadow"></div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="member-actions">
+                    <button class="member-action-btn member-action-redeem" onclick="window.router.navigate('/redeem')">
+                        <i class="fas fa-gift"></i>
+                        <span>แลกของรางวัล</span>
+                    </button>
+                    <button class="member-action-btn member-action-qr" onclick="window.liffApp.toggleMemberCard()">
+                        <i class="fas fa-qrcode"></i>
+                        <span>QR Code สะสมแต้ม</span>
+                    </button>
+                </div>
+
+                <!-- Points History Link -->
+                <div class="member-history-link">
+                    <button class="member-history-btn" onclick="window.router.navigate('/points')">
+                        <div class="member-history-icon">
+                            <i class="fas fa-history"></i>
+                        </div>
+                        <div class="member-history-text">
+                            <span class="member-history-title">ประวัติคะแนน</span>
+                            <span class="member-history-desc">ดูรายการสะสมและใช้แต้ม</span>
+                        </div>
+                        <i class="fas fa-chevron-right member-history-arrow"></i>
+                    </button>
+                </div>
+
+                <!-- Tier Benefits -->
+                <div class="member-benefits">
+                    <h3 class="member-benefits-title">สิทธิประโยชน์ ${tierName}</h3>
+                    <div class="member-benefits-list">
+                        ${this.renderTierBenefits(tierName)}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Toggle member card flip
+     */
+    toggleMemberCard() {
+        const card = document.getElementById('member-card-flip');
+        if (card) {
+            card.classList.toggle('flipped');
+        }
+    }
+
+    /**
+     * Render tier benefits
+     */
+    renderTierBenefits(tierName) {
+        const tierLower = (tierName || '').toLowerCase();
+        let benefits = [];
+
+        if (tierLower.includes('platinum') || tierLower.includes('vip')) {
+            benefits = [
+                { icon: 'fa-percent', text: 'ส่วนลด 15% ทุกการซื้อ' },
+                { icon: 'fa-truck', text: 'จัดส่งฟรีทุกออเดอร์' },
+                { icon: 'fa-star', text: 'แต้ม x3 ทุกการซื้อ' },
+                { icon: 'fa-gift', text: 'ของขวัญวันเกิดพิเศษ' },
+                { icon: 'fa-headset', text: 'สายด่วนเภสัชกร 24 ชม.' }
+            ];
+        } else if (tierLower.includes('gold')) {
+            benefits = [
+                { icon: 'fa-percent', text: 'ส่วนลด 10% ทุกการซื้อ' },
+                { icon: 'fa-truck', text: 'จัดส่งฟรีเมื่อซื้อครบ 300 บาท' },
+                { icon: 'fa-star', text: 'แต้ม x2 ทุกการซื้อ' },
+                { icon: 'fa-gift', text: 'ของขวัญวันเกิด' }
+            ];
+        } else if (tierLower.includes('bronze')) {
+            benefits = [
+                { icon: 'fa-percent', text: 'ส่วนลด 3% ทุกการซื้อ' },
+                { icon: 'fa-star', text: 'สะสมแต้มทุกการซื้อ' }
+            ];
+        } else {
+            benefits = [
+                { icon: 'fa-percent', text: 'ส่วนลด 5% ทุกการซื้อ' },
+                { icon: 'fa-truck', text: 'จัดส่งฟรีเมื่อซื้อครบ 500 บาท' },
+                { icon: 'fa-star', text: 'สะสมแต้มทุกการซื้อ' }
+            ];
+        }
+
+        return benefits.map(b => `
+            <div class="member-benefit-item">
+                <div class="member-benefit-icon">
+                    <i class="fas ${b.icon}"></i>
+                </div>
+                <span class="member-benefit-text">${b.text}</span>
+            </div>
+        `).join('');
+    }
+
+    // ==================== Wishlist Page ====================
+    // Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
+
+    /**
+     * Render wishlist page
+     * Requirements: 16.1, 16.2, 16.3, 16.4, 16.5
+     * - Display heart icon button to add/remove from wishlist (16.1)
+     * - Toggle wishlist status with animation (16.2)
+     * - Display filled heart icon for wishlist items (16.3)
+     * - Display all saved products in grid layout (16.4)
+     * - Show product image, name, price, and "Add to Cart" button (16.5)
+     */
+    renderWishlistPage() {
+        // Load wishlist data after render
+        setTimeout(() => this.loadWishlistData(), 100);
+
+        return `
+            <div class="wishlist-page">
+                <!-- Header -->
+                <div class="wishlist-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">❤️ รายการโปรด</h1>
+                    <span id="wishlist-count" class="wishlist-count">0 รายการ</span>
+                </div>
+                
+                <!-- Info Banner -->
+                <div class="wishlist-info-banner">
+                    <i class="fas fa-bell"></i>
+                    <span>เราจะแจ้งเตือนคุณเมื่อสินค้าในรายการโปรดลดราคา!</span>
+                </div>
+                
+                <!-- Wishlist Items -->
+                <div id="wishlist-container" class="wishlist-container">
+                    ${this.renderWishlistSkeleton()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render wishlist skeleton loading
+     */
+    renderWishlistSkeleton() {
+        return `
+            <div class="wishlist-skeleton">
+                ${Array(3).fill().map(() => `
+                    <div class="wishlist-item-skeleton">
+                        <div class="skeleton skeleton-wishlist-image"></div>
+                        <div class="wishlist-item-skeleton-info">
+                            <div class="skeleton skeleton-text"></div>
+                            <div class="skeleton skeleton-text short"></div>
+                            <div class="skeleton skeleton-button"></div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Load wishlist data from API
+     * Requirements: 16.4 - Display wishlist page
+     */
+    async loadWishlistData() {
+        const container = document.getElementById('wishlist-container');
+        const countEl = document.getElementById('wishlist-count');
+        if (!container) return;
+
+        const profile = window.store?.get('profile');
+
+        if (!profile?.userId) {
+            container.innerHTML = this.renderWishlistLoginRequired();
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                `${this.config.BASE_URL}/api/wishlist.php?action=list&line_user_id=${profile.userId}`
+            );
+            const data = await response.json();
+
+            if (data.success && data.items && data.items.length > 0) {
+                // Update store with wishlist items
+                const productIds = data.items.map(item => item.product_id);
+                window.store?.setWishlistItems(productIds);
+
+                // Render items
+                container.innerHTML = this.renderWishlistItems(data.items);
+                if (countEl) countEl.textContent = `${data.count || data.items.length} รายการ`;
+            } else {
+                container.innerHTML = this.renderWishlistEmptyState();
+                if (countEl) countEl.textContent = '0 รายการ';
+            }
+        } catch (error) {
+            console.error('Error loading wishlist:', error);
+            container.innerHTML = this.renderWishlistError();
+        }
+    }
+
+    /**
+     * Render wishlist items
+     * Requirements: 16.5 - Show product image, name, price, and "Add to Cart" button
+     */
+    renderWishlistItems(items) {
+        return `
+            <div class="wishlist-items">
+                ${items.map(item => this.renderWishlistItem(item)).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Render single wishlist item
+     */
+    renderWishlistItem(item) {
+        const price = parseFloat(item.sale_price || item.price || 0);
+        const originalPrice = parseFloat(item.price_when_added || item.price || 0);
+        const isOnSale = item.is_on_sale == 1 || (item.sale_price && item.sale_price < originalPrice);
+        const discount = item.discount_percent || (isOnSale ? Math.round((1 - price / originalPrice) * 100) : 0);
+        const isOutOfStock = parseInt(item.stock || 0) <= 0;
+
+        return `
+            <div class="wishlist-item" data-product-id="${item.product_id}">
+                <div class="wishlist-item-image" onclick="window.liffApp.viewProduct(${item.product_id})">
+                    ${item.image_url
+                ? `<img src="${item.image_url}" alt="${item.name}" loading="lazy" 
+                               onerror="this.src='assets/images/image-placeholder.svg'">`
+                : `<div class="wishlist-item-placeholder"><i class="fas fa-image"></i></div>`
+            }
+                </div>
+                <div class="wishlist-item-info">
+                    <div class="wishlist-item-header">
+                        <h3 class="wishlist-item-name" onclick="window.liffApp.viewProduct(${item.product_id})">${item.name}</h3>
+                        <button class="wishlist-remove-btn" onclick="window.liffApp.removeFromWishlistPage(${item.product_id})" title="ลบออกจากรายการโปรด">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                    <div class="wishlist-item-price">
+                        <span class="wishlist-price ${isOnSale ? 'sale' : ''}">฿${this.formatNumber(price)}</span>
+                        ${isOnSale ? `
+                            <span class="wishlist-original-price">฿${this.formatNumber(originalPrice)}</span>
+                            <span class="wishlist-discount-badge">-${discount}%</span>
+                        ` : ''}
+                    </div>
+                    <button class="wishlist-add-cart-btn ${isOutOfStock ? 'disabled' : ''}" 
+                            onclick="window.liffApp.addWishlistItemToCart(${item.product_id}, '${item.name.replace(/'/g, "\\'")}', ${price}, '${item.image_url || ''}')"
+                            ${isOutOfStock ? 'disabled' : ''}>
+                        <i class="fas fa-cart-plus"></i>
+                        ${isOutOfStock ? 'สินค้าหมด' : 'เพิ่มลงตะกร้า'}
+                    </button>
+                </div>
+                ${isOnSale ? `
+                    <div class="wishlist-sale-banner">
+                        <i class="fas fa-fire"></i>
+                        ลดราคาจากที่คุณเพิ่มไว้ ${discount}%!
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    /**
+     * View product detail - show modal instead of navigating
+     */
+    viewProduct(productId) {
+        this.showProductDetailModal(productId);
+    }
+
+    /**
+     * Remove item from wishlist on wishlist page
+     * Requirements: 16.8 - Show undo option for 5 seconds
+     */
+    async removeFromWishlistPage(productId) {
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        const itemEl = document.querySelector(`.wishlist-item[data-product-id="${productId}"]`);
+
+        // Optimistic UI - hide item
+        if (itemEl) {
+            itemEl.style.opacity = '0.5';
+            itemEl.style.pointerEvents = 'none';
+        }
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/wishlist.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'remove',
+                    line_user_id: profile.userId,
+                    product_id: productId
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Remove from store
+                window.store?.removeFromWishlist(productId);
+
+                // Remove from DOM with animation
+                if (itemEl) {
+                    itemEl.style.transition = 'all 0.3s ease';
+                    itemEl.style.transform = 'translateX(100%)';
+                    itemEl.style.opacity = '0';
+
+                    setTimeout(() => {
+                        itemEl.remove();
+
+                        // Check if empty
+                        const remaining = document.querySelectorAll('.wishlist-item').length;
+                        const countEl = document.getElementById('wishlist-count');
+
+                        if (remaining === 0) {
+                            const container = document.getElementById('wishlist-container');
+                            if (container) {
+                                container.innerHTML = this.renderWishlistEmptyState();
+                            }
+                        }
+
+                        if (countEl) countEl.textContent = `${remaining} รายการ`;
+                    }, 300);
+                }
+
+                this.showToast('ลบออกจากรายการโปรดแล้ว', 'success');
+            } else {
+                // Revert UI
+                if (itemEl) {
+                    itemEl.style.opacity = '1';
+                    itemEl.style.pointerEvents = 'auto';
+                }
+                this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+            }
+        } catch (error) {
+            console.error('Remove from wishlist error:', error);
+            // Revert UI
+            if (itemEl) {
+                itemEl.style.opacity = '1';
+                itemEl.style.pointerEvents = 'auto';
+            }
+            this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+        }
+    }
+
+    /**
+     * Add wishlist item to cart
+     */
+    addWishlistItemToCart(productId, name, price, imageUrl) {
+        const product = {
+            id: productId,
+            name: name,
+            price: price,
+            image_url: imageUrl,
+            is_prescription: false
+        };
+
+        window.store?.addToCart(product, 1);
+        this.showToast('เพิ่มลงตะกร้าแล้ว', 'success');
+        this.updateCartBadge();
+    }
+
+    /**
+     * Render wishlist empty state
+     * Requirements: 16.9 - Display empty state with "Browse Products" button
+     */
+    renderWishlistEmptyState() {
+        return `
+            <div class="wishlist-empty-state">
+                <div class="wishlist-empty-icon">
+                    <i class="far fa-heart"></i>
+                </div>
+                <h2 class="wishlist-empty-title">ยังไม่มีรายการโปรด</h2>
+                <p class="wishlist-empty-desc">กดปุ่ม ❤️ ที่สินค้าเพื่อเพิ่มรายการโปรด</p>
+                <button class="btn btn-primary" onclick="window.router.navigate('/shop')">
+                    <i class="fas fa-shopping-bag"></i>
+                    ไปช้อปปิ้ง
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render wishlist login required state
+     */
+    renderWishlistLoginRequired() {
+        return `
+            <div class="wishlist-empty-state">
+                <div class="wishlist-empty-icon">
+                    <i class="fas fa-user-lock"></i>
+                </div>
+                <h2 class="wishlist-empty-title">กรุณาเข้าสู่ระบบ</h2>
+                <p class="wishlist-empty-desc">เข้าสู่ระบบเพื่อดูรายการโปรดของคุณ</p>
+                <button class="btn btn-primary" onclick="window.liffApp.login()">
+                    <i class="fab fa-line"></i>
+                    เข้าสู่ระบบ LINE
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render wishlist error state
+     */
+    renderWishlistError() {
+        return `
+            <div class="wishlist-empty-state">
+                <div class="wishlist-empty-icon error">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h2 class="wishlist-empty-title">เกิดข้อผิดพลาด</h2>
+                <p class="wishlist-empty-desc">ไม่สามารถโหลดรายการโปรดได้ กรุณาลองใหม่</p>
+                <button class="btn btn-primary" onclick="window.liffApp.loadWishlistData()">
+                    <i class="fas fa-redo"></i>
+                    ลองใหม่
+                </button>
+            </div>
+        `;
+    }
+
+    // ==================== Notification Settings Page ====================
+    // Requirements: 14.1, 14.2, 14.3
+
+    /**
+     * Render notification settings page
+     * Requirements: 14.1, 14.2, 14.3
+     * - Display categorized notification toggles (14.1)
+     * - Show Order Updates, Promotions, Appointment Reminders, Drug Reminders, Health Tips (14.2)
+     * - Save preferences immediately via API (14.3)
+     */
+    renderNotificationSettingsPage() {
+        // Load settings after render
+        setTimeout(() => this.loadNotificationSettings(), 100);
+
+        return `
+            <div class="notification-settings-page">
+                <!-- Header -->
+                <div class="notification-settings-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">การแจ้งเตือน</h1>
+                    <div class="header-spacer"></div>
+                </div>
+                
+                <!-- Info Banner -->
+                <div class="notification-info-banner">
+                    <i class="fas fa-info-circle"></i>
+                    <span>เลือกประเภทการแจ้งเตือนที่คุณต้องการรับผ่าน LINE</span>
+                </div>
+                
+                <!-- Notification Categories -->
+                <div id="notification-settings-container" class="notification-settings-container">
+                    ${this.renderNotificationSettingsSkeleton()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render notification settings skeleton
+     */
+    renderNotificationSettingsSkeleton() {
+        return `
+            <div class="notification-settings-skeleton">
+                ${Array(5).fill().map(() => `
+                    <div class="notification-setting-skeleton">
+                        <div class="skeleton skeleton-icon"></div>
+                        <div class="notification-setting-skeleton-info">
+                            <div class="skeleton skeleton-text"></div>
+                            <div class="skeleton skeleton-text short"></div>
+                        </div>
+                        <div class="skeleton skeleton-toggle"></div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Load notification settings from API
+     * Requirements: 14.1 - Display categorized notification toggles
+     */
+    async loadNotificationSettings() {
+        const container = document.getElementById('notification-settings-container');
+        if (!container) return;
+
+        const profile = window.store?.get('profile');
+
+        if (!profile?.userId) {
+            container.innerHTML = this.renderNotificationSettingsLoginRequired();
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                `${this.config.BASE_URL}/api/user-notifications.php?action=get&line_user_id=${profile.userId}`
+            );
+            const data = await response.json();
+
+            if (data.success) {
+                // Update store
+                window.store?.setNotificationSettings(data.preferences);
+
+                // Render settings
+                container.innerHTML = this.renderNotificationSettingsContent(data.preferences);
+            } else {
+                container.innerHTML = this.renderNotificationSettingsError();
+            }
+        } catch (error) {
+            console.error('Error loading notification settings:', error);
+            container.innerHTML = this.renderNotificationSettingsError();
+        }
+    }
+
+    /**
+     * Render notification settings content
+     * Requirements: 14.2 - Show Order Updates, Promotions, Appointment Reminders, Drug Reminders, Health Tips
+     */
+    renderNotificationSettingsContent(preferences) {
+        const categories = [
+            {
+                key: 'order_updates',
+                icon: 'fa-box',
+                iconColor: '#3B82F6',
+                title: 'อัพเดทออเดอร์',
+                description: 'แจ้งเตือนยืนยันออเดอร์ การจัดส่ง และการรับสินค้า'
+            },
+            {
+                key: 'promotions',
+                icon: 'fa-tags',
+                iconColor: '#F59E0B',
+                title: 'โปรโมชั่น',
+                description: 'ข่าวสารโปรโมชั่นและส่วนลดพิเศษ'
+            },
+            {
+                key: 'appointment_reminders',
+                icon: 'fa-calendar-check',
+                iconColor: '#10B981',
+                title: 'เตือนนัดหมาย',
+                description: 'แจ้งเตือน 24 ชม. และ 30 นาทีก่อนนัดหมาย'
+            },
+            {
+                key: 'drug_reminders',
+                icon: 'fa-pills',
+                iconColor: '#EC4899',
+                title: 'เตือนทานยา',
+                description: 'แจ้งเตือนเวลาทานยาตามที่ตั้งไว้'
+            },
+            {
+                key: 'health_tips',
+                icon: 'fa-heart-pulse',
+                iconColor: '#EF4444',
+                title: 'เคล็ดลับสุขภาพ',
+                description: 'บทความและเคล็ดลับดูแลสุขภาพ'
+            },
+            {
+                key: 'price_alerts',
+                icon: 'fa-bell',
+                iconColor: '#8B5CF6',
+                title: 'แจ้งเตือนราคา',
+                description: 'แจ้งเมื่อสินค้าในรายการโปรดลดราคา'
+            },
+            {
+                key: 'restock_alerts',
+                icon: 'fa-warehouse',
+                iconColor: '#06B6D4',
+                title: 'แจ้งสินค้าเข้า',
+                description: 'แจ้งเมื่อสินค้าที่หมดกลับมามีสต็อก'
+            }
+        ];
+
+        return `
+            <div class="notification-settings-list">
+                ${categories.map(cat => `
+                    <div class="notification-setting-item" data-category="${cat.key}">
+                        <div class="notification-setting-icon" style="background-color: ${cat.iconColor}20; color: ${cat.iconColor};">
+                            <i class="fas ${cat.icon}"></i>
+                        </div>
+                        <div class="notification-setting-info">
+                            <div class="notification-setting-title">${cat.title}</div>
+                            <div class="notification-setting-desc">${cat.description}</div>
+                        </div>
+                        <label class="notification-toggle">
+                            <input type="checkbox" 
+                                   ${preferences[cat.key] ? 'checked' : ''} 
+                                   onchange="window.liffApp.toggleNotificationSetting('${cat.key}', this.checked)">
+                            <span class="notification-toggle-slider"></span>
+                        </label>
+                    </div>
+                `).join('')}
+            </div>
+            
+            <!-- Disable All Warning -->
+            <div class="notification-disable-warning">
+                <i class="fas fa-exclamation-triangle"></i>
+                <span>การปิดการแจ้งเตือนทั้งหมดอาจทำให้คุณพลาดข้อมูลสำคัญ</span>
+            </div>
+        `;
+    }
+
+    /**
+     * Toggle notification setting
+     * Requirements: 14.3 - Save preferences immediately via API
+     */
+    async toggleNotificationSetting(category, enabled) {
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        // Update store immediately (optimistic)
+        window.store?.setNotificationSetting(category, enabled);
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/user-notifications.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'toggle',
+                    line_user_id: profile.userId,
+                    line_account_id: this.config.ACCOUNT_ID,
+                    category: category,
+                    enabled: enabled
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.showToast(data.message, 'success');
+            } else {
+                // Revert on error
+                window.store?.setNotificationSetting(category, !enabled);
+                const checkbox = document.querySelector(`[data-category="${category}"] input`);
+                if (checkbox) checkbox.checked = !enabled;
+                this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+            }
+        } catch (error) {
+            console.error('Toggle notification error:', error);
+            // Revert on error
+            window.store?.setNotificationSetting(category, !enabled);
+            const checkbox = document.querySelector(`[data-category="${category}"] input`);
+            if (checkbox) checkbox.checked = !enabled;
+            this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+        }
+    }
+
+    /**
+     * Render notification settings login required
+     */
+    renderNotificationSettingsLoginRequired() {
+        return `
+            <div class="notification-settings-empty">
+                <div class="notification-settings-empty-icon">
+                    <i class="fas fa-user-lock"></i>
+                </div>
+                <h2 class="notification-settings-empty-title">กรุณาเข้าสู่ระบบ</h2>
+                <p class="notification-settings-empty-desc">เข้าสู่ระบบเพื่อตั้งค่าการแจ้งเตือน</p>
+                <button class="btn btn-primary" onclick="window.liffApp.login()">
+                    <i class="fab fa-line"></i>
+                    เข้าสู่ระบบ LINE
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render notification settings error
+     */
+    renderNotificationSettingsError() {
+        return `
+            <div class="notification-settings-empty">
+                <div class="notification-settings-empty-icon error">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h2 class="notification-settings-empty-title">เกิดข้อผิดพลาด</h2>
+                <p class="notification-settings-empty-desc">ไม่สามารถโหลดการตั้งค่าได้ กรุณาลองใหม่</p>
+                <button class="btn btn-primary" onclick="window.liffApp.loadNotificationSettings()">
+                    <i class="fas fa-redo"></i>
+                    ลองใหม่
+                </button>
+            </div>
+        `;
+    }
+
+    // ==================== Medication Reminders Page ====================
+    // Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7
+
+    /**
+     * Render medication reminders page
+     * Requirements: 15.1, 15.2, 15.3, 15.4, 15.5, 15.6, 15.7
+     * - Display list of active medication schedules (15.1)
+     * - Allow selection from order history or manual entry (15.2)
+     * - Capture medication name, dosage, frequency, and reminder times (15.3)
+     */
+    renderMedicationRemindersPage() {
+        // Load reminders after render
+        setTimeout(() => this.loadMedicationRemindersData(), 100);
+
+        return `
+            <div class="medication-reminders-page">
+                <!-- Header -->
+                <div class="medication-reminders-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">เตือนทานยา</h1>
+                    <button class="add-reminder-btn" onclick="window.liffApp.showAddReminderModal()">
+                        <i class="fas fa-plus"></i>
+                    </button>
+                </div>
+                
+                <!-- Info Banner -->
+                <div class="medication-info-banner">
+                    <i class="fas fa-bell"></i>
+                    <span>ตั้งเวลาเตือนทานยาเพื่อไม่พลาดทุกมื้อ</span>
+                </div>
+                
+                <!-- Reminders List -->
+                <div id="medication-reminders-container" class="medication-reminders-container">
+                    ${this.renderMedicationRemindersSkeleton()}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render medication reminders skeleton
+     */
+    renderMedicationRemindersSkeleton() {
+        return `
+            <div class="medication-reminders-skeleton">
+                ${Array(3).fill().map(() => `
+                    <div class="medication-reminder-skeleton">
+                        <div class="skeleton skeleton-pill-icon"></div>
+                        <div class="medication-reminder-skeleton-info">
+                            <div class="skeleton skeleton-text"></div>
+                            <div class="skeleton skeleton-text short"></div>
+                        </div>
+                        <div class="skeleton skeleton-toggle"></div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    }
+
+    /**
+     * Load medication reminders from API
+     * Requirements: 15.1 - Display list of active medication schedules
+     */
+    async loadMedicationRemindersData() {
+        const container = document.getElementById('medication-reminders-container');
+        if (!container) return;
+
+        const profile = window.store?.get('profile');
+
+        if (!profile?.userId) {
+            container.innerHTML = this.renderMedicationRemindersLoginRequired();
+            return;
+        }
+
+        try {
+            const response = await fetch(
+                `${this.config.BASE_URL}/api/medication-reminders.php?action=list&line_user_id=${profile.userId}`
+            );
+            const data = await response.json();
+
+            if (data.success) {
+                if (data.reminders && data.reminders.length > 0) {
+                    container.innerHTML = this.renderMedicationRemindersList(data.reminders);
+                } else {
+                    container.innerHTML = this.renderMedicationRemindersEmptyState();
+                }
+            } else {
+                container.innerHTML = this.renderMedicationRemindersError();
+            }
+        } catch (error) {
+            console.error('Error loading medication reminders:', error);
+            container.innerHTML = this.renderMedicationRemindersError();
+        }
+    }
+
+    /**
+     * Render medication reminders list
+     * Requirements: 15.7 - Display adherence percentage and missed doses
+     */
+    renderMedicationRemindersList(reminders) {
+        return `
+            <div class="medication-reminders-list">
+                ${reminders.map(reminder => this.renderMedicationReminderCard(reminder)).join('')}
+            </div>
+            
+            <!-- Adherence Summary -->
+            <div class="medication-adherence-summary">
+                <div class="adherence-summary-header">
+                    <i class="fas fa-chart-line"></i>
+                    <span>สรุปการทานยา 7 วันที่ผ่านมา</span>
+                </div>
+                <div class="adherence-summary-stats">
+                    ${this.renderAdherenceSummary(reminders)}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render single medication reminder card
+     */
+    renderMedicationReminderCard(reminder) {
+        const times = reminder.reminder_times || [];
+        const adherence = reminder.adherence_percent || 100;
+        const adherenceColor = adherence >= 80 ? 'success' : adherence >= 50 ? 'warning' : 'danger';
+
+        return `
+            <div class="medication-reminder-card" data-reminder-id="${reminder.id}">
+                <div class="medication-reminder-main">
+                    <div class="medication-pill-icon">
+                        <i class="fas fa-pills"></i>
+                    </div>
+                    <div class="medication-reminder-info">
+                        <div class="medication-reminder-name">${reminder.medication_name}</div>
+                        <div class="medication-reminder-dosage">${reminder.dosage || 'ไม่ระบุขนาด'}</div>
+                        <div class="medication-reminder-times">
+                            <i class="far fa-clock"></i>
+                            ${times.map(t => `<span class="reminder-time">${t}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="medication-reminder-actions">
+                        <button class="medication-edit-btn" onclick="window.liffApp.editReminder(${reminder.id})">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="medication-delete-btn" onclick="window.liffApp.deleteReminder(${reminder.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Adherence Bar -->
+                <div class="medication-adherence">
+                    <div class="adherence-label">
+                        <span>การทานยา</span>
+                        <span class="adherence-percent ${adherenceColor}">${adherence}%</span>
+                    </div>
+                    <div class="adherence-bar">
+                        <div class="adherence-fill ${adherenceColor}" style="width: ${adherence}%"></div>
+                    </div>
+                </div>
+                
+                <!-- Quick Actions -->
+                <div class="medication-quick-actions">
+                    <button class="mark-taken-btn" onclick="window.liffApp.markMedicationTaken(${reminder.id})">
+                        <i class="fas fa-check"></i>
+                        ทานแล้ว
+                    </button>
+                    <button class="skip-btn" onclick="window.liffApp.skipMedication(${reminder.id})">
+                        <i class="fas fa-forward"></i>
+                        ข้าม
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render adherence summary
+     */
+    renderAdherenceSummary(reminders) {
+        const totalTaken = reminders.reduce((sum, r) => sum + (r.taken_count_7d || 0), 0);
+        const totalMissed = reminders.reduce((sum, r) => sum + (r.missed_count_7d || 0), 0);
+        const total = totalTaken + totalMissed;
+        const overallAdherence = total > 0 ? Math.round((totalTaken / total) * 100) : 100;
+
+        return `
+            <div class="adherence-stat">
+                <div class="adherence-stat-value success">${totalTaken}</div>
+                <div class="adherence-stat-label">ทานแล้ว</div>
+            </div>
+            <div class="adherence-stat">
+                <div class="adherence-stat-value danger">${totalMissed}</div>
+                <div class="adherence-stat-label">พลาด</div>
+            </div>
+            <div class="adherence-stat">
+                <div class="adherence-stat-value ${overallAdherence >= 80 ? 'success' : 'warning'}">${overallAdherence}%</div>
+                <div class="adherence-stat-label">โดยรวม</div>
+            </div>
+        `;
+    }
+
+    /**
+     * Show add reminder modal
+     * Requirements: 15.2, 15.3 - Allow selection from order history or manual entry
+     */
+    showAddReminderModal() {
+        const modalHtml = `
+            <div class="modal medication-modal">
+                <div class="modal-header">
+                    <h3 class="modal-title">เพิ่มการเตือนทานยา</h3>
+                    <button class="modal-close" onclick="window.liffApp.hideModal()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="add-reminder-form" onsubmit="window.liffApp.submitAddReminder(event)">
+                        <!-- Medication Name -->
+                        <div class="form-group">
+                            <label class="form-label">ชื่อยา <span class="required">*</span></label>
+                            <input type="text" name="medication_name" class="form-input" 
+                                   placeholder="เช่น พาราเซตามอล" required>
+                        </div>
+                        
+                        <!-- Dosage -->
+                        <div class="form-group">
+                            <label class="form-label">ขนาดยา</label>
+                            <input type="text" name="dosage" class="form-input" 
+                                   placeholder="เช่น 1 เม็ด, 5 มล.">
+                        </div>
+                        
+                        <!-- Frequency -->
+                        <div class="form-group">
+                            <label class="form-label">ความถี่</label>
+                            <select name="frequency" class="form-select" onchange="window.liffApp.updateReminderTimes(this.value)">
+                                <option value="daily">วันละ 1 ครั้ง</option>
+                                <option value="twice_daily">วันละ 2 ครั้ง</option>
+                                <option value="three_times">วันละ 3 ครั้ง</option>
+                                <option value="custom">กำหนดเอง</option>
+                            </select>
+                        </div>
+                        
+                        <!-- Reminder Times -->
+                        <div class="form-group">
+                            <label class="form-label">เวลาเตือน</label>
+                            <div id="reminder-times-container" class="reminder-times-inputs">
+                                <input type="time" name="reminder_times[]" class="form-input time-input" value="08:00">
+                            </div>
+                            <button type="button" class="add-time-btn" onclick="window.liffApp.addReminderTimeInput()">
+                                <i class="fas fa-plus"></i> เพิ่มเวลา
+                            </button>
+                        </div>
+                        
+                        <!-- Notes -->
+                        <div class="form-group">
+                            <label class="form-label">หมายเหตุ</label>
+                            <textarea name="notes" class="form-textarea" rows="2" 
+                                      placeholder="เช่น ทานหลังอาหาร"></textarea>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary btn-block">
+                            <i class="fas fa-plus"></i> เพิ่มการเตือน
+                        </button>
+                    </form>
+                </div>
+            </div>
+        `;
+
+        this.showModal(modalHtml);
+    }
+
+    /**
+     * Update reminder times based on frequency
+     */
+    updateReminderTimes(frequency) {
+        const container = document.getElementById('reminder-times-container');
+        if (!container) return;
+
+        const timesByFrequency = {
+            'daily': ['08:00'],
+            'twice_daily': ['08:00', '20:00'],
+            'three_times': ['08:00', '12:00', '20:00'],
+            'custom': ['08:00']
+        };
+
+        const times = timesByFrequency[frequency] || ['08:00'];
+
+        container.innerHTML = times.map(time => `
+            <input type="time" name="reminder_times[]" class="form-input time-input" value="${time}">
+        `).join('');
+    }
+
+    /**
+     * Add reminder time input
+     */
+    addReminderTimeInput() {
+        const container = document.getElementById('reminder-times-container');
+        if (!container) return;
+
+        const input = document.createElement('input');
+        input.type = 'time';
+        input.name = 'reminder_times[]';
+        input.className = 'form-input time-input';
+        input.value = '12:00';
+        container.appendChild(input);
+    }
+
+    /**
+     * Submit add reminder form
+     */
+    async submitAddReminder(event) {
+        event.preventDefault();
+
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) {
+            this.showToast('กรุณาเข้าสู่ระบบ', 'error');
+            return;
+        }
+
+        const form = event.target;
+        const formData = new FormData(form);
+
+        // Get reminder times
+        const reminderTimes = [];
+        form.querySelectorAll('input[name="reminder_times[]"]').forEach(input => {
+            if (input.value) reminderTimes.push(input.value);
+        });
+
+        const data = {
+            action: 'add',
+            line_user_id: profile.userId,
+            line_account_id: this.config.ACCOUNT_ID,
+            medication_name: formData.get('medication_name'),
+            dosage: formData.get('dosage'),
+            frequency: formData.get('frequency'),
+            reminder_times: reminderTimes,
+            notes: formData.get('notes')
+        };
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/medication-reminders.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.hideModal();
+                this.showToast(result.message, 'success');
+                this.loadMedicationRemindersData();
+            } else {
+                this.showToast(result.error || 'เกิดข้อผิดพลาด', 'error');
+            }
+        } catch (error) {
+            console.error('Add reminder error:', error);
+            this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+        }
+    }
+
+    /**
+     * Mark medication as taken
+     * Requirements: 15.5, 15.6 - Mark as Taken action and record timestamp
+     */
+    async markMedicationTaken(reminderId) {
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/medication-reminders.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'mark_taken',
+                    line_user_id: profile.userId,
+                    reminder_id: reminderId,
+                    status: 'taken'
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.showToast('บันทึกการทานยาแล้ว ✓', 'success');
+                this.loadMedicationRemindersData();
+            } else {
+                this.showToast('เกิดข้อผิดพลาด', 'error');
+            }
+        } catch (error) {
+            console.error('Mark taken error:', error);
+            this.showToast('เกิดข้อผิดพลาด', 'error');
+        }
+    }
+
+    /**
+     * Skip medication
+     */
+    async skipMedication(reminderId) {
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/medication-reminders.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'mark_taken',
+                    line_user_id: profile.userId,
+                    reminder_id: reminderId,
+                    status: 'skipped'
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.showToast('ข้ามการทานยาครั้งนี้', 'info');
+                this.loadMedicationRemindersData();
+            }
+        } catch (error) {
+            console.error('Skip medication error:', error);
+        }
+    }
+
+    /**
+     * Delete reminder
+     */
+    async deleteReminder(reminderId) {
+        if (!confirm('ต้องการลบการเตือนนี้?')) return;
+
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/medication-reminders.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'delete',
+                    line_user_id: profile.userId,
+                    reminder_id: reminderId
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.showToast('ลบการเตือนแล้ว', 'success');
+                this.loadMedicationRemindersData();
+            }
+        } catch (error) {
+            console.error('Delete reminder error:', error);
+            this.showToast('เกิดข้อผิดพลาด', 'error');
+        }
+    }
+
+    /**
+     * Edit reminder (placeholder)
+     */
+    editReminder(reminderId) {
+        this.showToast('ฟีเจอร์แก้ไขจะเปิดให้ใช้งานเร็วๆ นี้', 'info');
+    }
+
+    /**
+     * Render medication reminders empty state
+     */
+    renderMedicationRemindersEmptyState() {
+        return `
+            <div class="medication-reminders-empty">
+                <div class="medication-reminders-empty-icon">
+                    <i class="fas fa-pills"></i>
+                </div>
+                <h2 class="medication-reminders-empty-title">ยังไม่มีการเตือนทานยา</h2>
+                <p class="medication-reminders-empty-desc">เพิ่มการเตือนเพื่อไม่พลาดเวลาทานยา</p>
+                <button class="btn btn-primary" onclick="window.liffApp.showAddReminderModal()">
+                    <i class="fas fa-plus"></i>
+                    เพิ่มการเตือน
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render medication reminders login required
+     */
+    renderMedicationRemindersLoginRequired() {
+        return `
+            <div class="medication-reminders-empty">
+                <div class="medication-reminders-empty-icon">
+                    <i class="fas fa-user-lock"></i>
+                </div>
+                <h2 class="medication-reminders-empty-title">กรุณาเข้าสู่ระบบ</h2>
+                <p class="medication-reminders-empty-desc">เข้าสู่ระบบเพื่อตั้งการเตือนทานยา</p>
+                <button class="btn btn-primary" onclick="window.liffApp.login()">
+                    <i class="fab fa-line"></i>
+                    เข้าสู่ระบบ LINE
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render medication reminders error
+     */
+    renderMedicationRemindersError() {
+        return `
+            <div class="medication-reminders-empty">
+                <div class="medication-reminders-empty-icon error">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h2 class="medication-reminders-empty-title">เกิดข้อผิดพลาด</h2>
+                <p class="medication-reminders-empty-desc">ไม่สามารถโหลดข้อมูลได้ กรุณาลองใหม่</p>
+                <button class="btn btn-primary" onclick="window.liffApp.loadMedicationRemindersData()">
+                    <i class="fas fa-redo"></i>
+                    ลองใหม่
+                </button>
+            </div>
+        `;
+    }
+
+    // ==================== AI Assistant Page Methods ====================
+    // Requirements: 7.1, 7.2
+
+    /**
+     * Render AI Assistant page
+     * Requirements: 7.1 - Display chat interface with quick symptom selection buttons
+     * @param {Object} params - Route parameters (may include symptom)
+     */
+    renderAIAssistantPage(params) {
+        // Return a container that will be populated by the AIChat component
+        return `<div id="ai-assistant-container"></div>`;
+    }
+
+    /**
+     * Initialize AI Assistant page with retry mechanism for mobile
+     * Requirements: 7.1, 7.2
+     * @param {Object} params - Route parameters
+     * @param {number} retryCount - Current retry attempt
+     */
+    initAIAssistantPage(params, retryCount = 0) {
+        const maxRetries = 10;
+        const retryDelay = 100;
+
+        if (window.debugLog) window.debugLog('initAIAssistantPage called (attempt ' + (retryCount + 1) + ')', 'info');
+        console.log('🤖 Initializing AI Assistant page... (attempt ' + (retryCount + 1) + ')');
+
+        const container = document.getElementById('ai-assistant-container');
+        if (!container) {
+            if (retryCount < maxRetries) {
+                if (window.debugLog) window.debugLog('Container not found, retrying in ' + retryDelay + 'ms...', 'warn');
+                setTimeout(() => this.initAIAssistantPage(params, retryCount + 1), retryDelay);
+                return;
+            }
+            if (window.debugLog) window.debugLog('Container not found after ' + maxRetries + ' retries!', 'error');
+            console.error('❌ AI Assistant container not found after retries');
+            // Try to show error in app-content instead
+            const appContent = document.getElementById('app-content');
+            if (appContent) {
+                appContent.innerHTML = `
+                    <div style="padding: 20px; text-align: center;">
+                        <p style="color: red;">ไม่สามารถโหลดหน้า AI Chat ได้</p>
+                        <button onclick="location.reload()" style="padding: 10px 20px; margin-top: 10px;">ลองใหม่</button>
+                    </div>
+                `;
+            }
+            return;
+        }
+        if (window.debugLog) window.debugLog('Container found!', 'success');
+
+        // Check if AIChat class exists
+        if (typeof AIChat === 'undefined') {
+            if (window.debugLog) window.debugLog('AIChat class NOT loaded!', 'error');
+            console.error('❌ AIChat class not loaded');
+            container.innerHTML = `
+                <div style="padding: 20px; text-align: center;">
+                    <p style="color: red;">ไม่สามารถโหลด AI Chat ได้</p>
+                    <p style="font-size: 12px; color: #666;">AIChat class is undefined</p>
+                    <button onclick="location.reload()" style="padding: 10px 20px; margin-top: 10px;">ลองใหม่</button>
+                </div>
+            `;
+            return;
+        }
+        if (window.debugLog) window.debugLog('AIChat class loaded', 'success');
+
+        try {
+            // Get user ID from profile
+            const profile = window.store?.get('profile');
+            const userId = profile?.userId || null;
+            if (window.debugLog) window.debugLog('User ID: ' + (userId || 'null'), 'info');
+
+            // Create AI Chat instance
+            if (window.debugLog) window.debugLog('Creating AIChat instance...', 'info');
+            window.aiChat = new AIChat({
+                userId: userId,
+                onSendMessage: (message) => {
+                    console.log('Message sent:', message);
+                },
+                onSymptomSelect: (symptom) => {
+                    console.log('Symptom selected:', symptom);
+                }
+            });
+
+            // Initialize the chat interface
+            if (window.debugLog) window.debugLog('Calling aiChat.init()...', 'info');
+            window.aiChat.init(container);
+            if (window.debugLog) window.debugLog('AI Chat initialized!', 'success');
+            console.log('✅ AI Chat initialized');
+
+            // If a symptom was passed from home page, start with it
+            if (params && params.symptom) {
+                window.aiChat.initWithSymptom(params.symptom);
+            }
+        } catch (error) {
+            if (window.debugLog) window.debugLog('Error: ' + error.message, 'error');
+            console.error('❌ Error initializing AI Chat:', error);
+            container.innerHTML = `
+                <div style="padding: 20px; text-align: center;">
+                    <p style="color: red;">เกิดข้อผิดพลาด: ${error.message}</p>
+                    <button onclick="location.reload()" style="padding: 10px 20px; margin-top: 10px;">ลองใหม่</button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Render Health Profile page
+     * Requirements: 18.1, 18.2, 18.3, 18.4, 18.5, 18.6, 18.7, 18.10, 18.12
+     */
+    renderHealthProfilePage() {
+        return `
+            <div class="page-no-header">
+                <div id="health-profile-container" class="page-content">
+                    <!-- Health profile content will be loaded here -->
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Initialize Health Profile page
+     * Requirements: 18.1, 18.10
+     */
+    initHealthProfilePage() {
+        if (window.healthProfile) {
+            window.healthProfile.init();
+        }
+    }
+
+    /**
+     * Render Product Detail page - redirect to modal
+     */
+    renderProductDetailPage(params) {
+        const productId = params?.id;
+
+        if (productId) {
+            // Show modal instead of page, then go back
+            setTimeout(() => {
+                this.showProductDetailModal(productId);
+                // Go back to previous page after modal is shown
+                window.router.back();
+            }, 100);
+        }
+
+        // Return empty content since we're showing modal
+        return `
+            <div class="product-detail-page">
+                <div class="product-detail-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">รายละเอียดสินค้า</h1>
+                </div>
+                <div class="empty-state">
+                    <div class="skeleton" style="width: 100%; aspect-ratio: 1;"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Load product detail from API (legacy - kept for compatibility)
+     */
+    async loadProductDetail(productId) {
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/shop-products.php?product_id=${productId}`);
+            const data = await response.json();
+
+            const container = document.getElementById('product-detail-content');
+            if (!container) return;
+
+            if (data.success && data.product) {
+                const product = data.product;
+                const priceHtml = product.sale_price && product.sale_price < product.price
+                    ? '<span style="text-decoration: line-through; color: var(--text-muted); font-size: 1rem; margin-left: 8px;">฿' + this.formatNumber(product.price) + '</span>'
+                    : '';
+                container.innerHTML = `
+                    <img src="${product.image_url || 'assets/images/placeholder.png'}" 
+                         class="product-detail-image"
+                         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%23f0f0f0%22 width=%22100%22 height=%22100%22/></svg>'">
+                    <div class="product-detail-info">
+                        <h1 class="product-detail-name">${product.name}</h1>
+                        <div class="product-detail-price">
+                            ฿${this.formatNumber(product.sale_price || product.price)}
+                            ${priceHtml}
+                        </div>
+                        <p class="product-detail-description">${product.description || 'ไม่มีรายละเอียดสินค้า'}</p>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = '<div class="empty-state"><p>ไม่พบข้อมูลสินค้า</p></div>';
+            }
+        } catch (error) {
+            console.error('Error loading product:', error);
+        }
+    }
+
+    /**
+     * Buy now - add to cart and go to checkout
+     */
+    buyNow(productId) {
+        this.addToCart(productId);
+        setTimeout(() => window.router.navigate('/checkout'), 500);
+    }
+
+    /**
+     * Render Appointments page
+     * เหมือนระบบเก่า liff-appointment.php - นัดเภสัชกรก่อน แล้วค่อย video call ตามเวลานัด
+     */
+    renderAppointmentsPage() {
+        // Initialize appointment state first
+        this.initAppointmentState();
+
+        // Load pharmacists and appointments
+        setTimeout(() => {
+            this.loadPharmacistsForAppointment();
+            this.loadMyAppointments();
+        }, 100);
+
+        return `
+            <div class="appointments-page">
+                <div class="appointments-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title" style="flex: 1; margin-left: 12px;">นัดหมายพบเภสัชกร</h1>
+                    <button class="btn btn-icon" onclick="window.liffApp.showMyAppointments()">
+                        <i class="fas fa-calendar-check"></i>
+                    </button>
+                </div>
+
+                <!-- Step Indicator -->
+                <div id="appointment-steps" class="appointment-steps">
+                    <div class="step active" data-step="1">
+                        <span class="step-number">1</span>
+                        <span class="step-label">เลือกเภสัชกร</span>
+                    </div>
+                    <div class="step-line"></div>
+                    <div class="step" data-step="2">
+                        <span class="step-number">2</span>
+                        <span class="step-label">เลือกเวลา</span>
+                    </div>
+                    <div class="step-line"></div>
+                    <div class="step" data-step="3">
+                        <span class="step-number">3</span>
+                        <span class="step-label">ยืนยัน</span>
+                    </div>
+                </div>
+
+                <!-- Step 1: Select Pharmacist -->
+                <div id="appointment-step-1" class="appointment-step-content">
+                    <div id="pharmacist-list" class="pharmacist-list">
+                        <!-- Loading skeleton -->
+                        <div class="pharmacist-card skeleton-card">
+                            <div class="skeleton" style="width: 80px; height: 80px; border-radius: 12px;"></div>
+                            <div style="flex: 1;">
+                                <div class="skeleton" style="height: 20px; width: 60%; margin-bottom: 8px;"></div>
+                                <div class="skeleton" style="height: 14px; width: 40%; margin-bottom: 8px;"></div>
+                                <div class="skeleton" style="height: 14px; width: 80%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Select Date & Time -->
+                <div id="appointment-step-2" class="appointment-step-content hidden">
+                    <div id="selected-pharmacist-info" class="selected-pharmacist-info"></div>
+                    
+                    <div class="date-selection">
+                        <h3>เลือกวันที่</h3>
+                        <div id="date-list" class="date-list"></div>
+                    </div>
+                    
+                    <div class="time-selection">
+                        <h3>เลือกเวลา</h3>
+                        <div id="time-slots" class="time-slots"></div>
+                        <p id="no-slots-msg" class="no-slots-msg hidden">ไม่มีช่วงเวลาว่างในวันนี้</p>
+                    </div>
+                    
+                    <button id="step2-next-btn" class="btn btn-primary btn-block" onclick="window.liffApp.goToAppointmentStep(3)" disabled>
+                        ถัดไป
+                    </button>
+                </div>
+
+                <!-- Step 3: Confirm -->
+                <div id="appointment-step-3" class="appointment-step-content hidden">
+                    <div class="confirm-card">
+                        <h3>ยืนยันการนัดหมาย</h3>
+                        <div id="confirm-details" class="confirm-details"></div>
+                    </div>
+                    
+                    <div class="symptoms-card">
+                        <h3>อาการ/เหตุผลที่มา (ถ้ามี)</h3>
+                        <textarea id="appointment-symptoms" rows="3" placeholder="เช่น ปวดหัว มีไข้ ต้องการปรึกษาเรื่องยา..."></textarea>
+                    </div>
+                    
+                    <button id="confirm-booking-btn" class="btn btn-primary btn-block" onclick="window.liffApp.confirmBookAppointment()">
+                        ยืนยันนัดหมาย
+                    </button>
+                </div>
+
+                <!-- My Appointments Modal -->
+                <div id="my-appointments-modal" class="appointments-modal hidden">
+                    <div class="appointments-modal-header">
+                        <button class="back-btn" onclick="window.liffApp.hideMyAppointments()">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h2>นัดหมายของฉัน</h2>
+                    </div>
+                    <div id="my-appointments-list" class="my-appointments-list"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Initialize appointment state
+     */
+    initAppointmentState() {
+        this.appointmentState = {
+            currentStep: 1,
+            pharmacists: [],
+            selectedPharmacist: null,
+            selectedDate: null,
+            selectedTime: null,
+            myAppointments: []
+        };
+    }
+
+    /**
+     * Switch appointment tab
+     */
+    switchAppointmentTab(tab) {
+        if (!this.appointmentState) this.initAppointmentState();
+        this.appointmentState.currentTab = tab;
+
+        // Update tab UI
+        document.querySelectorAll('.appointment-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.tab === tab);
+        });
+
+        // Show/hide step indicator
+        const steps = document.getElementById('appointment-steps');
+        if (steps) {
+            steps.classList.toggle('hidden', tab === 'instant');
+        }
+    }
+
+    /**
+     * Load pharmacists for appointment
+     */
+    async loadPharmacistsForAppointment() {
+        if (!this.appointmentState) this.initAppointmentState();
+
+        const container = document.getElementById('pharmacist-list');
+        if (!container) return;
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/appointments.php?action=pharmacists&line_account_id=${this.config.ACCOUNT_ID}`);
+            const data = await response.json();
+
+            if (data.success && data.pharmacists?.length > 0) {
+                this.appointmentState.pharmacists = data.pharmacists;
+                this.renderPharmacistList(data.pharmacists);
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-user-md"></i>
+                        <p>ยังไม่มีเภสัชกรให้บริการ</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading pharmacists:', error);
+            container.innerHTML = `
+                <div class="empty-state error">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p>ไม่สามารถโหลดข้อมูลได้</p>
+                    <button class="btn btn-sm btn-outline" onclick="window.liffApp.loadPharmacistsForAppointment()">ลองใหม่</button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Render pharmacist list
+     */
+    renderPharmacistList(pharmacists) {
+        const container = document.getElementById('pharmacist-list');
+        if (!container) return;
+
+        if (!pharmacists || pharmacists.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-user-md"></i>
+                    <p>ยังไม่มีเภสัชกรให้บริการ</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = pharmacists.map(p => {
+            const fee = p.consultation_fee > 0 ? `฿${this.formatNumber(p.consultation_fee)}` : 'ฟรี';
+            const duration = p.consultation_duration || 15;
+
+            return `
+                <div class="pharmacist-card" onclick="window.liffApp.selectPharmacistForAppointment(${p.id})">
+                    <div class="pharmacist-avatar">
+                        <img src="${p.image_url || this.config.BASE_URL + '/assets/images/avatar-placeholder.png'}" 
+                             alt="${p.name}"
+                             onerror="this.src='${this.config.BASE_URL}/assets/images/avatar-placeholder.png'">
+                        <span class="pharmacist-rating">
+                            <i class="fas fa-star"></i> ${p.rating || '5.0'}
+                        </span>
+                    </div>
+                    <div class="pharmacist-info">
+                        <h3 class="pharmacist-name">${p.name}</h3>
+                        <p class="pharmacist-specialty">${p.specialty || 'เภสัชกรทั่วไป'}</p>
+                        <p class="pharmacist-license"><i class="fas fa-id-card"></i> ${p.license_no || '-'}</p>
+                        <div class="pharmacist-meta">
+                            <span class="pharmacist-fee">${fee}</span>
+                            <span class="pharmacist-duration">${duration} นาที</span>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary btn-sm pharmacist-book-btn" onclick="event.stopPropagation(); window.liffApp.selectPharmacistForAppointment(${p.id})">
+                        นัดหมาย
+                    </button>
+                </div>
+            `;
+        }).join('');
+    }
+
+    /**
+     * Select pharmacist for appointment
+     */
+    selectPharmacistForAppointment(pharmacistId) {
+        if (!this.appointmentState) this.initAppointmentState();
+
+        const pharmacist = this.appointmentState.pharmacists.find(p => p.id == pharmacistId);
+        if (!pharmacist) return;
+
+        this.appointmentState.selectedPharmacist = pharmacist;
+
+        // Go to step 2 - select date/time
+        this.goToAppointmentStep(2);
+        this.renderSelectedPharmacistInfo();
+        this.renderDateSelection();
+    }
+
+    /**
+     * Go to appointment step
+     */
+    goToAppointmentStep(step) {
+        if (!this.appointmentState) this.initAppointmentState();
+        this.appointmentState.currentStep = step;
+
+        // Hide all steps
+        document.querySelectorAll('.appointment-step-content').forEach(el => el.classList.add('hidden'));
+
+        // Show current step
+        const stepEl = document.getElementById(`appointment-step-${step}`);
+        if (stepEl) stepEl.classList.remove('hidden');
+
+        // Update step indicators
+        document.querySelectorAll('.appointment-steps .step').forEach(el => {
+            const s = parseInt(el.dataset.step);
+            el.classList.toggle('active', s <= step);
+            el.classList.toggle('completed', s < step);
+        });
+
+        // Show step indicator
+        const stepsEl = document.getElementById('appointment-steps');
+        if (stepsEl) stepsEl.classList.remove('hidden');
+
+        // Render confirmation details when going to step 3
+        if (step === 3) {
+            this.renderConfirmationDetails();
+        }
+    }
+
+    /**
+     * Render selected pharmacist info
+     */
+    renderSelectedPharmacistInfo() {
+        const container = document.getElementById('selected-pharmacist-info');
+        const p = this.appointmentState?.selectedPharmacist;
+        if (!container || !p) return;
+
+        container.innerHTML = `
+            <div class="selected-pharmacist">
+                <img src="${p.image_url || this.config.BASE_URL + '/assets/images/avatar-placeholder.png'}" alt="${p.name}">
+                <div>
+                    <h4>${p.name}</h4>
+                    <p>${p.specialty || 'เภสัชกรทั่วไป'}</p>
+                </div>
+                <button class="btn btn-icon btn-sm" onclick="window.liffApp.goToAppointmentStep(1)">
+                    <i class="fas fa-edit"></i>
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Render date selection
+     */
+    renderDateSelection() {
+        const container = document.getElementById('date-list');
+        if (!container) return;
+
+        const today = new Date();
+        let html = '';
+
+        for (let i = 0; i < 14; i++) {
+            const date = new Date(today);
+            date.setDate(today.getDate() + i);
+            const dateStr = date.toISOString().split('T')[0];
+            const dayName = date.toLocaleDateString('th-TH', { weekday: 'short' });
+            const dayNum = date.getDate();
+            const monthName = date.toLocaleDateString('th-TH', { month: 'short' });
+            const isSelected = this.appointmentState?.selectedDate === dateStr;
+
+            html += `
+                <button class="date-btn ${isSelected ? 'selected' : ''}" 
+                        data-date="${dateStr}"
+                        onclick="window.liffApp.selectAppointmentDate('${dateStr}')">
+                    <span class="date-day">${dayName}</span>
+                    <span class="date-num">${dayNum}</span>
+                    <span class="date-month">${monthName}</span>
+                </button>
+            `;
+        }
+
+        container.innerHTML = html;
+
+        // Auto select first date
+        if (!this.appointmentState?.selectedDate) {
+            this.selectAppointmentDate(today.toISOString().split('T')[0]);
+        }
+    }
+
+    /**
+     * Select appointment date
+     */
+    async selectAppointmentDate(dateStr) {
+        if (!this.appointmentState) this.initAppointmentState();
+        this.appointmentState.selectedDate = dateStr;
+        this.appointmentState.selectedTime = null;
+
+        // Update UI
+        document.querySelectorAll('.date-btn').forEach(btn => {
+            btn.classList.toggle('selected', btn.dataset.date === dateStr);
+        });
+
+        // Disable next button
+        const nextBtn = document.getElementById('step2-next-btn');
+        if (nextBtn) nextBtn.disabled = true;
+
+        // Load time slots
+        await this.loadTimeSlots();
+    }
+
+    /**
+     * Load available time slots
+     */
+    async loadTimeSlots() {
+        const container = document.getElementById('time-slots');
+        const noSlotsMsg = document.getElementById('no-slots-msg');
+        if (!container) return;
+
+        container.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+        if (noSlotsMsg) noSlotsMsg.classList.add('hidden');
+
+        try {
+            const pharmacistId = this.appointmentState?.selectedPharmacist?.id;
+            const date = this.appointmentState?.selectedDate;
+
+            console.log('📅 Loading time slots for:', { pharmacistId, date });
+
+            const response = await fetch(`${this.config.BASE_URL}/api/appointments.php?action=available_slots&pharmacist_id=${pharmacistId}&date=${date}`);
+            const data = await response.json();
+
+            console.log('📅 Time slots response:', data);
+
+            if (data.success && data.slots?.length > 0) {
+                container.innerHTML = data.slots.map(slot => `
+                    <button class="time-slot-btn ${slot.available ? '' : 'disabled'}" 
+                            data-time="${slot.time}"
+                            onclick="window.liffApp.selectAppointmentTime('${slot.time}')"
+                            ${!slot.available ? 'disabled' : ''}>
+                        ${slot.time}
+                    </button>
+                `).join('');
+            } else {
+                container.innerHTML = '';
+                if (noSlotsMsg) {
+                    noSlotsMsg.classList.remove('hidden');
+                    // Show message from API if available
+                    if (data.message) {
+                        noSlotsMsg.textContent = data.message;
+                    } else {
+                        noSlotsMsg.textContent = 'ไม่มีช่วงเวลาว่างในวันนี้';
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error loading time slots:', error);
+            container.innerHTML = '<p class="error-text">ไม่สามารถโหลดข้อมูลได้</p>';
+        }
+    }
+
+    /**
+     * Select appointment time
+     */
+    selectAppointmentTime(time) {
+        if (!this.appointmentState) this.initAppointmentState();
+        this.appointmentState.selectedTime = time;
+
+        // Update UI
+        document.querySelectorAll('.time-slot-btn').forEach(btn => {
+            btn.classList.toggle('selected', btn.dataset.time === time);
+        });
+
+        // Enable next button
+        const nextBtn = document.getElementById('step2-next-btn');
+        if (nextBtn) nextBtn.disabled = false;
+    }
+
+    /**
+     * Render confirmation details
+     */
+    renderConfirmationDetails() {
+        const container = document.getElementById('confirm-details');
+        if (!container || !this.appointmentState) return;
+
+        const p = this.appointmentState.selectedPharmacist;
+        const date = new Date(this.appointmentState.selectedDate);
+        const dateFormatted = date.toLocaleDateString('th-TH', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+        });
+
+        container.innerHTML = `
+            <div class="confirm-item">
+                <i class="fas fa-user-md"></i>
+                <div>
+                    <label>เภสัชกร</label>
+                    <span>${p?.name || '-'}</span>
+                </div>
+            </div>
+            <div class="confirm-item">
+                <i class="fas fa-calendar"></i>
+                <div>
+                    <label>วันที่</label>
+                    <span>${dateFormatted}</span>
+                </div>
+            </div>
+            <div class="confirm-item">
+                <i class="fas fa-clock"></i>
+                <div>
+                    <label>เวลา</label>
+                    <span>${this.appointmentState.selectedTime || '-'}</span>
+                </div>
+            </div>
+            <div class="confirm-item">
+                <i class="fas fa-video"></i>
+                <div>
+                    <label>รูปแบบ</label>
+                    <span>Video Call</span>
+                </div>
+            </div>
+            <div class="confirm-item">
+                <i class="fas fa-money-bill"></i>
+                <div>
+                    <label>ค่าบริการ</label>
+                    <span>${p?.consultation_fee > 0 ? '฿' + this.formatNumber(p.consultation_fee) : 'ฟรี'}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Confirm book appointment
+     */
+    async confirmBookAppointment() {
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) {
+            this.showToast('กรุณาเข้าสู่ระบบก่อน', 'warning');
+            return;
+        }
+
+        const btn = document.getElementById('confirm-booking-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังจอง...';
+        }
+
+        try {
+            const symptoms = document.getElementById('appointment-symptoms')?.value || '';
+
+            const response = await fetch(`${this.config.BASE_URL}/api/appointments.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'book',
+                    line_user_id: profile.userId,
+                    line_account_id: this.config.ACCOUNT_ID,
+                    pharmacist_id: this.appointmentState?.selectedPharmacist?.id,
+                    date: this.appointmentState?.selectedDate,
+                    time: this.appointmentState?.selectedTime,
+                    symptoms: symptoms
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.showToast('จองนัดหมายสำเร็จ!', 'success');
+
+                // Send LIFF message via LiffMessageBridge
+                if (window.liffMessageBridge) {
+                    try {
+                        await window.liffMessageBridge.sendAppointmentBooked(
+                            this.appointmentState?.selectedDate,
+                            this.appointmentState?.selectedTime,
+                            {
+                                pharmacist: this.appointmentState?.selectedPharmacist?.name,
+                                appointmentId: data.appointment_id
+                            }
+                        );
+                    } catch (e) {
+                        console.warn('Failed to send appointment message:', e);
+                    }
+                }
+
+                // Reset state and go back to step 1
+                this.initAppointmentState();
+                this.goToAppointmentStep(1);
+                this.loadPharmacistsForAppointment();
+            } else {
+                this.showToast(data.message || 'ไม่สามารถจองได้', 'error');
+            }
+        } catch (error) {
+            console.error('Error booking appointment:', error);
+            this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = 'ยืนยันนัดหมาย';
+            }
+        }
+    }
+
+    /**
+     * Show my appointments modal
+     */
+    showMyAppointments() {
+        const modal = document.getElementById('my-appointments-modal');
+        if (modal) {
+            modal.classList.remove('hidden');
+            this.loadMyAppointments();
+        }
+    }
+
+    /**
+     * Hide my appointments modal
+     */
+    hideMyAppointments() {
+        const modal = document.getElementById('my-appointments-modal');
+        if (modal) modal.classList.add('hidden');
+    }
+
+    /**
+     * Load my appointments
+     */
+    async loadMyAppointments() {
+        const profile = window.store?.get('profile');
+        const container = document.getElementById('my-appointments-list');
+        if (!container) return;
+
+        if (!profile?.userId) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-user-lock"></i>
+                    <p>กรุณาเข้าสู่ระบบเพื่อดูนัดหมาย</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/appointments.php?action=my_appointments&line_user_id=${profile.userId}`);
+            const data = await response.json();
+
+            if (data.success && (data.upcoming?.length > 0 || data.past?.length > 0)) {
+                let html = '';
+
+                // Upcoming appointments
+                if (data.upcoming?.length > 0) {
+                    html += '<h3 class="appointments-section-title">นัดหมายที่กำลังจะมาถึง</h3>';
+                    html += data.upcoming.map(apt => this.renderMyAppointmentCard(apt, true)).join('');
+                }
+
+                // Past appointments
+                if (data.past?.length > 0) {
+                    html += '<h3 class="appointments-section-title">นัดหมายที่ผ่านมา</h3>';
+                    html += data.past.map(apt => this.renderMyAppointmentCard(apt, false)).join('');
+                }
+
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <i class="far fa-calendar-alt"></i>
+                        <p>ยังไม่มีนัดหมาย</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading appointments:', error);
+            container.innerHTML = `
+                <div class="empty-state error">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p>ไม่สามารถโหลดข้อมูลได้</p>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Render my appointment card
+     */
+    renderMyAppointmentCard(apt, isUpcoming) {
+        const canJoin = isUpcoming && apt.status === 'confirmed' && this.isAppointmentTimeNow(apt.appointment_date, apt.appointment_time);
+        const dateFormatted = new Date(apt.appointment_date).toLocaleDateString('th-TH', {
+            day: 'numeric',
+            month: 'short',
+            year: '2-digit'
+        });
+
+        return `
+            <div class="my-appointment-card ${apt.status}">
+                <div class="appointment-datetime">
+                    <i class="far fa-calendar"></i>
+                    ${dateFormatted} เวลา ${apt.appointment_time}
+                </div>
+                <div class="appointment-pharmacist">
+                    <img src="${apt.pharmacist_image || this.config.BASE_URL + '/assets/images/avatar-placeholder.png'}" 
+                         alt="${apt.pharmacist_name}"
+                         onerror="this.src='${this.config.BASE_URL}/assets/images/avatar-placeholder.png'">
+                    <span>${apt.pharmacist_name || 'เภสัชกร'}</span>
+                </div>
+                <div class="appointment-status-row">
+                    <span class="appointment-status ${apt.status}">${this.getAppointmentStatusText(apt.status)}</span>
+                    ${canJoin ? `
+                        <button class="btn btn-primary btn-sm" onclick="window.router.navigate('/video-call', { appointment_id: '${apt.appointment_id}' })">
+                            <i class="fas fa-video"></i> เข้าร่วม
+                        </button>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Check if appointment time is now (within 15 minutes)
+     */
+    isAppointmentTimeNow(dateStr, timeStr) {
+        const appointmentDate = new Date(`${dateStr}T${timeStr}`);
+        const now = new Date();
+        const diffMinutes = (appointmentDate - now) / (1000 * 60);
+        return diffMinutes >= -15 && diffMinutes <= 15;
+    }
+
+    getAppointmentStatusText(status) {
+        const statusMap = {
+            'pending': 'รอยืนยัน',
+            'confirmed': 'ยืนยันแล้ว',
+            'completed': 'เสร็จสิ้น',
+            'cancelled': 'ยกเลิก'
+        };
+        return statusMap[status] || status;
+    }
+
+    /**
+     * Render Redeem Points page
+     */
+    async renderRedeemPage() {
+        // Initialize RewardsCatalog component if not already done
+        if (!window.rewardsCatalog) {
+            window.rewardsCatalog = new window.RewardsCatalog({
+                baseUrl: this.config.BASE_URL,
+                accountId: this.config.ACCOUNT_ID
+            });
+        }
+
+        // Load rewards data
+        const profile = window.store?.get('profile');
+        const lineUserId = profile?.userId;
+
+        if (lineUserId) {
+            setTimeout(async () => {
+                await window.rewardsCatalog.loadRewardsData(lineUserId);
+                const container = document.querySelector('.app-content');
+                if (container) {
+                    container.innerHTML = window.rewardsCatalog.render();
+                }
+            }, 100);
+        }
+
+        // Return skeleton loading
+        return window.rewardsCatalog.renderSkeleton();
+    }
+
+    /**
+     * Load rewards from API
+     */
+    async loadRewards() {
+        const container = document.getElementById('rewards-list');
+        if (!container) return;
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/rewards.php?action=list&line_account_id=${this.config.ACCOUNT_ID}`);
+            const data = await response.json();
+
+            if (data.success && data.rewards?.length > 0) {
+                const member = window.store?.get('member');
+                const userPoints = member?.points || 0;
+
+                let html = '';
+                data.rewards.forEach(reward => {
+                    const canRedeem = userPoints >= reward.points_required && (reward.stock === null || reward.stock === -1 || reward.stock > 0);
+                    const isOutOfStock = reward.stock !== null && reward.stock !== -1 && reward.stock <= 0;
+                    html += `
+                        <div class="reward-card ${!canRedeem ? 'disabled' : ''}" data-reward-id="${reward.id}" data-can-redeem="${canRedeem}">
+                            <img src="${reward.image_url || this.config.BASE_URL + '/assets/images/image-placeholder.svg'}"
+                                 class="reward-image"
+                                 onerror="this.src='${this.config.BASE_URL}/assets/images/image-placeholder.svg'">
+                            <div class="reward-info">
+                                <div class="reward-name">${reward.name}</div>
+                                <div class="reward-points">${this.formatNumber(reward.points_required)} แต้ม</div>
+                                ${isOutOfStock ? '<div class="reward-insufficient">หมดแล้ว</div>' : !canRedeem ? '<div class="reward-insufficient">แต้มไม่พอ</div>' : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                container.innerHTML = html;
+
+                // Add click event listeners
+                console.log('📋 Adding click listeners to', container.querySelectorAll('.reward-card').length, 'reward cards');
+                container.querySelectorAll('.reward-card').forEach((card, index) => {
+                    const rewardId = card.getAttribute('data-reward-id');
+                    const canRedeem = card.getAttribute('data-can-redeem') === 'true';
+
+                    console.log(`Card ${index}: ID=${rewardId}, canRedeem=${canRedeem}`);
+
+                    if (canRedeem) {
+                        card.style.cursor = 'pointer';
+                        card.addEventListener('click', () => {
+                            console.log('🎁 Reward card clicked! ID:', rewardId);
+                            this.showRewardDetail(parseInt(rewardId));
+                        });
+                    } else {
+                        card.style.cursor = 'not-allowed';
+                    }
+                });
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state" style="padding: 40px 20px; text-align: center;">
+                        <i class="fas fa-gift" style="font-size: 48px; color: var(--text-muted); margin-bottom: 16px;"></i>
+                        <h3 style="margin-bottom: 8px;">ยังไม่มีรางวัล</h3>
+                        <p style="color: var(--text-secondary);">รางวัลจะเพิ่มเข้ามาเร็วๆ นี้</p>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading rewards:', error);
+            container.innerHTML = '<div class="empty-state"><p>ไม่สามารถโหลดข้อมูลได้</p></div>';
+        }
+    }
+
+    async showRewardDetail(rewardId) {
+        try {
+            // Fetch reward details
+            const response = await fetch(`${this.config.BASE_URL}/api/rewards.php?action=list&line_account_id=${this.config.ACCOUNT_ID}`);
+            const data = await response.json();
+
+            if (!data.success || !data.rewards) {
+                this.showToast('ไม่สามารถโหลดข้อมูลรางวัลได้', 'error');
+                return;
+            }
+
+            const reward = data.rewards.find(r => r.id == rewardId);
+            if (!reward) {
+                this.showToast('ไม่พบรางวัลนี้', 'error');
+                return;
+            }
+
+            const member = window.store?.get('member');
+            const userPoints = member?.points || 0;
+            const canRedeem = userPoints >= reward.points_required;
+
+            // Show modal
+            const modalHtml = `
+                <div class="modal-overlay" id="rewardDetailModal" onclick="if(event.target === this) window.liffApp.closeRewardModal()">
+                    <div class="modal-content reward-detail-modal">
+                        <button class="close-modal" onclick="window.liffApp.closeRewardModal()"></button>
+
+                        <img class="reward-detail-image"
+                             src="${reward.image_url || this.config.BASE_URL + '/assets/images/image-placeholder.svg'}"
+                             alt="${reward.name}"
+                             onerror="this.src='${this.config.BASE_URL}/assets/images/image-placeholder.svg'">
+
+                        <div class="reward-detail-content">
+                            <h2>${reward.name}</h2>
+
+                            <div class="reward-detail-points">
+                                <span class="points-badge">
+                                    <i class="fas fa-coins"></i>
+                                    ${this.formatNumber(reward.points_required)} แต้ม
+                                </span>
+                            </div>
+
+                            ${reward.description ? `
+                                <div class="reward-detail-description">
+                                    <h3>รายละเอียด</h3>
+                                    <p>${reward.description}</p>
+                                </div>
+                            ` : ''}
+
+                            ${reward.terms ? `
+                                <div class="reward-detail-terms">
+                                    <h3>เงื่อนไข</h3>
+                                    <ul>
+                                        ${reward.terms.split('\n').map(term => term.trim() ? `<li>${term}</li>` : '').join('')}
+                                    </ul>
+                                </div>
+                            ` : ''}
+
+                            ${reward.stock && reward.stock > 0 && reward.stock <= 10 ? `
+                                <div class="reward-stock-warning">
+                                    <i class="fas fa-exclamation-triangle"></i>
+                                    <span>เหลือเพียง ${reward.stock} รางวัล</span>
+                                </div>
+                            ` : ''}
+
+                            ${!canRedeem ? `
+                                <div class="reward-insufficient-notice">
+                                    <div class="notice-header">
+                                        <i class="fas fa-info-circle"></i>
+                                        <strong>แต้มไม่เพียงพอ</strong>
+                                    </div>
+                                    <p class="user-points">แต้มของคุณ: ${this.formatNumber(userPoints)} แต้ม</p>
+                                    <p class="shortage">ต้องการอีก ${this.formatNumber(reward.points_required - userPoints)} แต้ม</p>
+                                </div>
+                            ` : ''}
+
+                            <button class="reward-redeem-btn ${canRedeem ? 'primary' : 'disabled'}"
+                                    onclick="window.liffApp.confirmRedeem(${reward.id})"
+                                    ${!canRedeem || (reward.stock !== null && reward.stock <= 0) ? 'disabled' : ''}>
+                                <i class="fas fa-gift"></i>
+                                ${canRedeem ? (reward.stock !== null && reward.stock <= 0 ? 'สินค้าหมด' : 'แลกรางวัลนี้') : 'แต้มไม่เพียงพอ'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Append to body
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = modalHtml;
+            document.body.appendChild(tempDiv.firstElementChild);
+
+            // Trigger animation
+            setTimeout(() => {
+                const modal = document.getElementById('rewardDetailModal');
+                if (modal) modal.classList.add('show');
+            }, 10);
+
+        } catch (error) {
+            console.error('Error showing reward detail:', error);
+            this.showToast('เกิดข้อผิดพลาด', 'error');
+        }
+    }
+
+    closeRewardModal() {
+        const modal = document.getElementById('rewardDetailModal');
+        if (modal) {
+            modal.classList.remove('show');
+            setTimeout(() => modal.remove(), 300);
+        }
+    }
+
+    async confirmRedeem(rewardId) {
+        console.log('=== REDEEM REWARD START ===');
+        console.log('confirmRedeem called with rewardId:', rewardId);
+
+        const profile = window.store?.get('profile');
+        console.log('Profile:', profile);
+
+        if (!profile?.userId) {
+            console.error('❌ ERROR: No userId in profile');
+            console.error('Profile object:', profile);
+            this.showToast('กรุณาเข้าสู่ระบบ', 'error');
+            return;
+        }
+
+        // Show confirmation
+        if (!confirm('ยืนยันการแลกรางวัลนี้?')) {
+            console.log('User cancelled confirmation');
+            return;
+        }
+
+        // Show loading
+        const btn = document.querySelector('.reward-redeem-btn');
+        console.log('Button found:', btn);
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังแลก...';
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('action', 'redeem');
+            formData.append('line_user_id', profile.userId);
+            formData.append('line_account_id', this.config.ACCOUNT_ID);
+            formData.append('reward_id', rewardId);
+
+            const requestData = {
+                action: 'redeem',
+                line_user_id: profile.userId,
+                line_account_id: this.config.ACCOUNT_ID,
+                reward_id: rewardId
+            };
+
+            console.log('📤 Sending request to:', `${this.config.BASE_URL}/api/rewards.php`);
+            console.log('📤 Request data:', requestData);
+
+            const response = await fetch(`${this.config.BASE_URL}/api/rewards.php`, {
+                method: 'POST',
+                body: formData
+            });
+
+            console.log('📥 Response status:', response.status);
+            console.log('📥 Response status text:', response.statusText);
+            console.log('📥 Response headers:', Object.fromEntries(response.headers.entries()));
+
+            // Check if response is JSON
+            const contentType = response.headers.get('content-type');
+            console.log('📥 Content-Type:', contentType);
+
+            if (!contentType || !contentType.includes('application/json')) {
+                const text = await response.text();
+                console.error('❌ ERROR: Non-JSON response received');
+                console.error('Response text (first 1000 chars):', text.substring(0, 1000));
+                console.error('Response text (full):', text);
+                throw new Error('API ส่งข้อมูลผิดพลาด (ไม่ใช่ JSON) กรุณาลองใหม่อีกครั้ง');
+            }
+
+            const data = await response.json();
+            console.log('📥 Response data:', data);
+            console.log('📥 Response success:', data.success);
+            console.log('📥 Response message:', data.message);
+            console.log('📥 Response error:', data.error);
+
+            if (data.success) {
+                console.log('✅ SUCCESS: Redemption successful');
+                console.log('Redemption code:', data.redemption_code);
+
+                // Update member points
+                const member = window.store?.get('member');
+                if (member) {
+                    // Deduct points locally
+                    const reward = data.reward || {};
+                    const pointsUsed = reward.points_required || 0;
+                    console.log('Updating member points. Current:', member.points, 'Used:', pointsUsed);
+                    member.points = Math.max(0, (member.points || 0) - pointsUsed);
+                    window.store?.set('member', member);
+                    console.log('New points:', member.points);
+                }
+
+                // Close modal
+                this.closeRewardModal();
+
+                // Show success with redemption code
+                const successHtml = `
+                    <div class="modal-overlay success-modal" id="successModal" onclick="if(event.target === this) window.liffApp.closeSuccessModal()">
+                        <div class="modal-content success-modal-content">
+                            <div class="success-icon">
+                                <i class="fas fa-check-circle"></i>
+                            </div>
+                            <h2>แลกรางวัลสำเร็จ!</h2>
+                            <p class="success-subtitle">รหัสรับรางวัลของคุณ</p>
+                            <div class="redemption-code-box">
+                                <code class="redemption-code">${data.redemption_code || ''}</code>
+                                <button class="copy-code-btn" onclick="window.liffApp.copyCode('${data.redemption_code || ''}')">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                            <p class="success-note">กรุณาแสดงรหัสนี้เพื่อรับรางวัล</p>
+                            <button class="btn btn-primary btn-block" onclick="window.liffApp.closeSuccessModal()">
+                                เข้าใจแล้ว
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = successHtml;
+                document.body.appendChild(tempDiv.firstElementChild);
+
+                setTimeout(() => {
+                    const modal = document.getElementById('successModal');
+                    if (modal) modal.classList.add('show');
+                }, 10);
+
+                // Reload rewards list after closing success modal
+                setTimeout(() => this.loadRewards(), 1000);
+
+                console.log('=== REDEEM REWARD SUCCESS ===');
+
+            } else {
+                console.error('❌ ERROR: Redemption failed');
+                console.error('Error message:', data.error || data.message);
+
+                // Show error alert
+                alert('❌ แลกรางวัลไม่สำเร็จ\n\n' + (data.error || data.message || 'ไม่สามารถแลกรางวัลได้'));
+
+                throw new Error(data.error || data.message || 'ไม่สามารถแลกรางวัลได้');
+            }
+
+        } catch (error) {
+            console.error('❌ EXCEPTION: Error redeeming reward');
+            console.error('Error type:', error.constructor.name);
+            console.error('Error message:', error.message);
+            console.error('Error stack:', error.stack);
+
+            // Show error alert
+            alert('❌ เกิดข้อผิดพลาด\n\n' + (error.message || 'ไม่สามารถแลกรางวัลได้'));
+
+            this.showToast(error.message || 'เกิดข้อผิดพลาด', 'error');
+
+            // Restore button
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-gift"></i> แลกรางวัลนี้';
+            }
+
+            console.log('=== REDEEM REWARD FAILED ===');
+        }
+    }
+
+    closeSuccessModal() {
+        const modal = document.getElementById('successModal');
+        if (modal) {
+            modal.classList.remove('show');
+            setTimeout(() => modal.remove(), 300);
+        }
+    }
+
+    async copyCode(code) {
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(code);
+                this.showToast('คัดลอกรหัสแล้ว', 'success');
+            } else {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = code;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-999999px';
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                this.showToast('คัดลอกรหัสแล้ว', 'success');
+            }
+        } catch (error) {
+            console.error('Error copying code:', error);
+            this.showToast('ไม่สามารถคัดลอกได้', 'error');
+        }
+    }
+
+    /**
+     * Render Points Dashboard page
+     * Requirements: 21.1, 21.2, 21.3, 21.4, 21.5, 21.6, 21.7, 21.8
+     */
+    renderPointsDashboardPage() {
+        // Initialize points dashboard component
+        if (!this.pointsDashboard) {
+            this.pointsDashboard = new PointsDashboard({
+                baseUrl: this.config.BASE_URL,
+                accountId: this.config.ACCOUNT_ID
+            });
+        }
+
+        // Load data after render
+        setTimeout(() => this.loadPointsDashboardData(), 100);
+
+        // Return skeleton initially
+        return this.pointsDashboard.renderSkeleton();
+    }
+
+    /**
+     * Load points dashboard data from API
+     */
+    async loadPointsDashboardData() {
+        const profile = window.store?.get('profile');
+
+        if (!profile?.userId) {
+            // Show login prompt
+            const container = document.querySelector('.points-dashboard');
+            if (container) {
+                container.innerHTML = `
+                    <div class="points-dashboard-header">
+                        <button class="back-btn" onclick="window.router.back()">
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        <h1 class="page-title">คะแนนสะสม</h1>
+                        <div style="width: 44px;"></div>
+                    </div>
+                    <div class="zero-balance-state">
+                        <div class="zero-balance-illustration">
+                            <i class="fas fa-user-lock"></i>
+                        </div>
+                        <h2 class="zero-balance-title">กรุณาเข้าสู่ระบบ</h2>
+                        <p class="zero-balance-message">
+                            เข้าสู่ระบบเพื่อดูคะแนนสะสมของคุณ
+                        </p>
+                        <button class="btn btn-primary btn-lg btn-block" onclick="window.liffApp.login()">
+                            <i class="fab fa-line"></i> เข้าสู่ระบบ LINE
+                        </button>
+                    </div>
+                `;
+            }
+            return;
+        }
+
+        try {
+            const data = await this.pointsDashboard.loadPointsData(profile.userId);
+
+            if (data) {
+                const container = document.querySelector('.app-content');
+                if (container) {
+                    container.innerHTML = this.pointsDashboard.render(data);
+
+                    // Animate counter after render
+                    setTimeout(() => this.pointsDashboard.animateCounter(), 100);
+                }
+            } else {
+                // Show error state
+                const container = document.querySelector('.points-dashboard');
+                if (container) {
+                    container.innerHTML = `
+                        <div class="points-dashboard-header">
+                            <button class="back-btn" onclick="window.router.back()">
+                                <i class="fas fa-arrow-left"></i>
+                            </button>
+                            <h1 class="page-title">คะแนนสะสม</h1>
+                            <div style="width: 44px;"></div>
+                        </div>
+                        <div class="error-state" style="padding: 40px 20px; text-align: center;">
+                            <i class="fas fa-exclamation-circle" style="font-size: 48px; color: var(--text-muted); margin-bottom: 16px;"></i>
+                            <h3 style="margin-bottom: 8px;">ไม่สามารถโหลดข้อมูลได้</h3>
+                            <p style="color: var(--text-secondary); margin-bottom: 16px;">กรุณาลองใหม่อีกครั้ง</p>
+                            <button class="btn btn-primary" onclick="window.liffApp.loadPointsDashboardData()">
+                                <i class="fas fa-redo"></i> ลองใหม่
+                            </button>
+                        </div>
+                    `;
+                }
+            }
+        } catch (error) {
+            console.error('Error loading points dashboard:', error);
+            this.showToast('ไม่สามารถโหลดข้อมูลได้', 'error');
+        }
+    }
+
+    /**
+     * Render Register/Member Registration page
+     */
+    renderRegisterPage() {
+        const profile = window.store?.get('profile');
+
+        // Check if already registered
+        const member = window.store?.get('member');
+        if (member?.is_registered) {
+            setTimeout(() => {
+                this.showToast('คุณเป็นสมาชิกอยู่แล้ว', 'info');
+                window.router.navigate('/member');
+            }, 100);
+            return '<div class="loading-page"><div class="loading-spinner"></div></div>';
+        }
+
+        return `
+            <div class="register-page">
+                <div class="register-header">
+                    <button class="back-btn" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">สมัครสมาชิก</h1>
+                    <div class="header-spacer"></div>
+                </div>
+
+                <form id="register-form" class="register-form" onsubmit="window.liffApp.submitRegistration(event)">
+                    <!-- Profile Preview -->
+                    <div class="register-profile-preview">
+                        <img src="${profile?.pictureUrl || this.config.BASE_URL + '/assets/images/avatar-placeholder.png'}" 
+                             alt="Profile" class="register-avatar"
+                             onerror="this.src='${this.config.BASE_URL}/assets/images/avatar-placeholder.png'">
+                        <div class="register-profile-info">
+                            <p class="register-profile-name">${profile?.displayName || 'ผู้ใช้'}</p>
+                            <p class="register-profile-hint">ข้อมูลจาก LINE</p>
+                        </div>
+                    </div>
+
+                    <!-- Required Fields -->
+                    <div class="form-section">
+                        <h3 class="form-section-title">ข้อมูลส่วนตัว <span class="required">*</span></h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="first_name">ชื่อ <span class="required">*</span></label>
+                                <input type="text" id="first_name" name="first_name" required placeholder="ชื่อจริง">
+                            </div>
+                            <div class="form-group">
+                                <label for="last_name">นามสกุล</label>
+                                <input type="text" id="last_name" name="last_name" placeholder="นามสกุล">
+                            </div>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="birthday">วันเกิด <span class="required">*</span></label>
+                                <input type="date" id="birthday" name="birthday" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="gender">เพศ <span class="required">*</span></label>
+                                <select id="gender" name="gender" required>
+                                    <option value="">เลือก</option>
+                                    <option value="male">ชาย</option>
+                                    <option value="female">หญิง</option>
+                                    <option value="other">อื่นๆ</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="phone">เบอร์โทรศัพท์</label>
+                            <input type="tel" id="phone" name="phone" placeholder="0812345678" pattern="[0-9]{9,10}">
+                        </div>
+                    </div>
+
+                    <!-- Health Info -->
+                    <div class="form-section">
+                        <h3 class="form-section-title">ข้อมูลสุขภาพ (ถ้ามี)</h3>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="weight">น้ำหนัก (กก.)</label>
+                                <input type="number" id="weight" name="weight" placeholder="60" min="1" max="300" step="0.1">
+                            </div>
+                            <div class="form-group">
+                                <label for="height">ส่วนสูง (ซม.)</label>
+                                <input type="number" id="height" name="height" placeholder="170" min="50" max="250">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="drug_allergies">แพ้ยา</label>
+                            <textarea id="drug_allergies" name="drug_allergies" rows="2" placeholder="ระบุยาที่แพ้ (ถ้ามี)"></textarea>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="medical_conditions">โรคประจำตัว</label>
+                            <textarea id="medical_conditions" name="medical_conditions" rows="2" placeholder="ระบุโรคประจำตัว (ถ้ามี)"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Address -->
+                    <div class="form-section">
+                        <h3 class="form-section-title">ที่อยู่จัดส่ง (ถ้ามี)</h3>
+                        
+                        <div class="form-group">
+                            <label for="address">ที่อยู่</label>
+                            <textarea id="address" name="address" rows="2" placeholder="บ้านเลขที่ ซอย ถนน"></textarea>
+                        </div>
+
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="district">เขต/อำเภอ</label>
+                                <input type="text" id="district" name="district" placeholder="เขต/อำเภอ">
+                            </div>
+                            <div class="form-group">
+                                <label for="province">จังหวัด</label>
+                                <input type="text" id="province" name="province" placeholder="จังหวัด">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="postal_code">รหัสไปรษณีย์</label>
+                            <input type="text" id="postal_code" name="postal_code" placeholder="10xxx" pattern="[0-9]{5}">
+                        </div>
+                    </div>
+
+                    <!-- Consent -->
+                    <div class="form-section">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="consent" name="consent" required>
+                            <span>ยอมรับ <a href="#" onclick="window.liffApp.showTerms(); return false;">ข้อกำหนดและเงื่อนไข</a> และ <a href="#" onclick="window.liffApp.showPrivacy(); return false;">นโยบายความเป็นส่วนตัว</a></span>
+                        </label>
+                    </div>
+
+                    <!-- Submit Button -->
+                    <button type="submit" id="register-submit-btn" class="btn btn-primary btn-block btn-lg">
+                        <i class="fas fa-user-plus"></i> สมัครสมาชิก
+                    </button>
+                </form>
+            </div>
+        `;
+    }
+
+    /**
+     * Submit registration form
+     */
+    async submitRegistration(event) {
+        event.preventDefault();
+
+        const profile = window.store?.get('profile');
+        if (!profile?.userId) {
+            this.showToast('กรุณาเข้าสู่ระบบผ่าน LINE ก่อน', 'warning');
+            return;
+        }
+
+        const form = document.getElementById('register-form');
+        const btn = document.getElementById('register-submit-btn');
+
+        if (!form.checkValidity()) {
+            form.reportValidity();
+            return;
+        }
+
+        // Disable button
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังสมัคร...';
+
+        try {
+            const formData = new FormData(form);
+            const data = {
+                action: 'register',
+                line_user_id: profile.userId,
+                line_account_id: this.config.ACCOUNT_ID,
+                first_name: formData.get('first_name'),
+                last_name: formData.get('last_name'),
+                birthday: formData.get('birthday'),
+                gender: formData.get('gender'),
+                phone: formData.get('phone'),
+                weight: formData.get('weight'),
+                height: formData.get('height'),
+                drug_allergies: formData.get('drug_allergies'),
+                medical_conditions: formData.get('medical_conditions'),
+                address: formData.get('address'),
+                district: formData.get('district'),
+                province: formData.get('province'),
+                postal_code: formData.get('postal_code')
+            };
+
+            const response = await fetch(`${this.config.BASE_URL}/api/member.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showToast('สมัครสมาชิกสำเร็จ!', 'success');
+
+                // Reload member data
+                await this.loadMemberData();
+
+                // Navigate to member card
+                setTimeout(() => {
+                    window.router.navigate('/member');
+                }, 1000);
+            } else {
+                this.showToast(result.message || 'ไม่สามารถสมัครได้', 'error');
+            }
+        } catch (error) {
+            console.error('Registration error:', error);
+            this.showToast('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-user-plus"></i> สมัครสมาชิก';
+        }
+    }
+
+    /**
+     * Show terms of service
+     */
+    showTerms() {
+        window.open(`${this.config.BASE_URL}/terms-of-service.php`, '_blank');
+    }
+
+    /**
+     * Show privacy policy
+     */
+    showPrivacy() {
+        window.open(`${this.config.BASE_URL}/privacy-policy.php`, '_blank');
+    }
+
+    /**
+     * Render placeholder page
+     */
+    renderPlaceholderPage(page, params) {
+        const paramsStr = params && Object.keys(params).length > 0
+            ? '<p class="text-xs text-muted mt-2">Params: ' + JSON.stringify(params) + '</p>'
+            : '';
+        return `
+            <div class="placeholder-page p-4">
+                <h2 class="text-xl font-bold mb-4">${page}</h2>
+                <p class="text-secondary">หน้านี้จะถูกพัฒนาในขั้นตอนถัดไป</p>
+                ${paramsStr}
+            </div>
+        `;
+    }
+
+    // ==================== Prescription Drug Flow Methods ====================
+    // Requirements: 11.1, 11.2, 11.3, 11.4, 11.7, 11.9, 11.10
+
+    /**
+     * Check prescription approval for checkout
+     * Requirements: 11.3 - Block checkout for Rx items without approval
+     */
+    async checkPrescriptionApprovalForCheckout() {
+        const cart = window.store?.get('cart');
+
+        if (!cart || !cart.hasPrescription) return;
+
+        // Use PrescriptionHandler if available
+        if (window.PrescriptionHandler) {
+            const checkResult = await window.PrescriptionHandler.canProceedToCheckout(cart);
+
+            if (!checkResult.canCheckout) {
+                // Show blocked modal
+                window.PrescriptionHandler.showCheckoutBlockedModal(
+                    cart,
+                    checkResult,
+                    // onConsult callback
+                    (prescriptionItems) => {
+                        this.requestPrescriptionConsultation(prescriptionItems);
+                    },
+                    // onClose callback
+                    () => {
+                        // Stay on checkout page but disable submit
+                        this.updateCheckoutPrescriptionState(false);
+                    }
+                );
+            } else {
+                this.updateCheckoutPrescriptionState(true);
+            }
+        }
+    }
+
+    /**
+     * Verify existing prescription approval is still valid
+     * Requirements: 11.10 - Require re-consultation if expired
+     */
+    async verifyPrescriptionApproval() {
+        const cart = window.store?.get('cart');
+
+        if (!cart || !cart.prescriptionApprovalId) return;
+
+        if (window.PrescriptionHandler) {
+            const status = await window.PrescriptionHandler.checkApprovalStatus(cart.prescriptionApprovalId);
+
+            if (!status.valid) {
+                // Approval expired or invalid
+                cart.prescriptionApprovalId = null;
+                window.store?.set('cart', cart);
+
+                // Show expired modal
+                window.PrescriptionHandler.showCheckoutBlockedModal(
+                    cart,
+                    { canCheckout: false, reason: status.reason, expired: status.expired, needsConsultation: true },
+                    (prescriptionItems) => {
+                        this.requestPrescriptionConsultation(prescriptionItems);
+                    },
+                    () => {
+                        this.updateCheckoutPrescriptionState(false);
+                    }
+                );
+            } else {
+                // Show approval timer
+                this.showApprovalTimer(status);
+                this.updateCheckoutPrescriptionState(true);
+            }
+        }
+    }
+
+    /**
+     * Update checkout state based on prescription approval
+     */
+    updateCheckoutPrescriptionState(approved) {
+        if (this.checkoutState) {
+            this.checkoutState.prescriptionApproved = approved;
+        }
+
+        // Update submit button state
+        const submitBtn = document.getElementById('place-order-btn');
+        if (submitBtn && !approved) {
+            submitBtn.disabled = true;
+        }
+
+        // Show/hide prescription warning
+        this.updateCheckoutPrescriptionUI(approved);
+    }
+
+    /**
+     * Update checkout UI for prescription status
+     */
+    updateCheckoutPrescriptionUI(approved) {
+        const cart = window.store?.get('cart');
+        if (!cart?.hasPrescription) return;
+
+        // Find or create prescription notice container
+        let noticeContainer = document.getElementById('checkout-rx-status');
+
+        if (!noticeContainer) {
+            const checkoutForm = document.getElementById('checkout-form');
+            if (checkoutForm) {
+                noticeContainer = document.createElement('div');
+                noticeContainer.id = 'checkout-rx-status';
+                checkoutForm.insertBefore(noticeContainer, checkoutForm.firstChild);
+            }
+        }
+
+        if (noticeContainer) {
+            if (approved) {
+                noticeContainer.innerHTML = `
+                    <div class="checkout-rx-approved" style="padding: 16px; background: linear-gradient(135deg, #D1FAE5, #A7F3D0); border-radius: 16px; margin-bottom: 16px; border: 1px solid #10B981;">
+                        <div style="display: flex; align-items: center; gap: 12px;">
+                            <div style="width: 40px; height: 40px; background: #10B981; border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-check" style="color: white; font-size: 18px;"></i>
+                            </div>
+                            <div>
+                                <p style="font-size: 14px; font-weight: 700; color: #065F46; margin-bottom: 2px;">ยาได้รับการอนุมัติแล้ว</p>
+                                <p style="font-size: 12px; color: #047857;">คุณสามารถดำเนินการสั่งซื้อได้</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                const prescriptionItems = window.PrescriptionHandler?.getPrescriptionItems(cart) || [];
+                noticeContainer.innerHTML = `
+                    <div class="checkout-rx-blocked" style="padding: 16px; background: linear-gradient(135deg, #FEE2E2, #FECACA); border-radius: 16px; margin-bottom: 16px; border: 1px solid #EF4444;">
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                            <div style="width: 40px; height: 40px; background: #EF4444; border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+                                <i class="fas fa-prescription" style="color: white; font-size: 18px;"></i>
+                            </div>
+                            <div>
+                                <p style="font-size: 14px; font-weight: 700; color: #991B1B; margin-bottom: 2px;">ต้องปรึกษาเภสัชกรก่อน</p>
+                                <p style="font-size: 12px; color: #B91C1C;">มียา ${prescriptionItems.length} รายการที่ต้องได้รับการอนุมัติ</p>
+                            </div>
+                        </div>
+                        <button onclick="window.liffApp.requestPrescriptionConsultation()" class="btn-consult-pharmacist" style="width: 100%; min-height: 48px; background: linear-gradient(135deg, #11B0A6, #0D8A82); color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                            <i class="fas fa-video"></i> ปรึกษาเภสัชกร
+                        </button>
+                    </div>
+                `;
+            }
+        }
+    }
+
+    /**
+     * Show approval timer in checkout
+     */
+    showApprovalTimer(approvalStatus) {
+        if (!approvalStatus.expiresAt) return;
+
+        const timeRemaining = window.PrescriptionHandler?.getTimeUntilExpiry(approvalStatus.expiresAt);
+        if (!timeRemaining || timeRemaining.expired) return;
+
+        const isExpiringSoon = timeRemaining.hours < 2;
+
+        let timerContainer = document.getElementById('approval-timer-container');
+        if (!timerContainer) {
+            const checkoutForm = document.getElementById('checkout-form');
+            if (checkoutForm) {
+                timerContainer = document.createElement('div');
+                timerContainer.id = 'approval-timer-container';
+                checkoutForm.insertBefore(timerContainer, checkoutForm.firstChild);
+            }
+        }
+
+        if (timerContainer) {
+            timerContainer.innerHTML = `
+                <div class="approval-timer ${isExpiringSoon ? 'expiring-soon' : ''}" style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: ${isExpiringSoon ? '#FEF3C7' : '#D1FAE5'}; border-radius: 12px; margin-bottom: 16px;">
+                    <i class="fas fa-clock" style="font-size: 16px; color: ${isExpiringSoon ? '#D97706' : '#059669'};"></i>
+                    <span style="font-size: 13px; color: ${isExpiringSoon ? '#92400E' : '#065F46'};">
+                        การอนุมัติยาจะหมดอายุใน 
+                        <strong style="color: ${isExpiringSoon ? '#D97706' : '#059669'};">${timeRemaining.hours} ชม. ${timeRemaining.minutes} นาที</strong>
+                    </span>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Request prescription consultation
+     * Requirements: 11.4 - Display "Consult Pharmacist" button
+     */
+    requestPrescriptionConsultation(prescriptionItems) {
+        const cart = window.store?.get('cart');
+        const items = prescriptionItems || window.PrescriptionHandler?.getPrescriptionItems(cart) || [];
+
+        // Navigate to video call with prescription context
+        window.router?.navigate('/video-call', {
+            reason: 'prescription_approval',
+            items: items.map(item => ({
+                product_id: item.product_id,
+                name: item.name,
+                quantity: item.quantity
+            }))
+        });
+    }
+
+    /**
+     * Handle prescription product being added to cart
+     * Requirements: 11.2 - Display modal explaining approval process
+     */
+    handlePrescriptionProductAdd(product, onSuccess, onCancel) {
+        if (!window.PrescriptionHandler?.isPrescriptionProduct(product)) {
+            // Not a prescription product, proceed normally
+            if (onSuccess) onSuccess(product);
+            return;
+        }
+
+        // Show prescription info modal
+        window.PrescriptionHandler.showPrescriptionInfoModal(
+            product,
+            (prod) => {
+                // User acknowledged, proceed with add
+                if (onSuccess) onSuccess(prod);
+            },
+            () => {
+                // User cancelled
+                if (onCancel) onCancel();
+            }
+        );
+    }
+
+    // ==================== Video Call Page ====================
+    // Requirements: 6.2, 6.3
+
+    /**
+     * Render video call page
+     * Requirements: 6.2 - Establish WebRTC connection using peer-to-peer signaling
+     * Requirements: 6.3, 6.4, 6.5, 6.8 - Display large video area with remote video prominent, call controls, iOS handling
+     * @param {Object} params - Route parameters
+     */
+    renderVideoCallPage(params = {}) {
+        // Get appointment_id from params
+        const appointmentId = params.appointment_id || params.appointmentId || null;
+
+        // Initialize video call manager if not already done
+        if (window.videoCallManager) {
+            window.videoCallManager.init({
+                baseUrl: this.config.BASE_URL,
+                accountId: this.config.ACCOUNT_ID,
+                appointmentId: appointmentId,
+                onStateChange: (state, oldState, data) => this.handleVideoCallStateChange(state, oldState, data),
+                onRemoteStream: (stream) => this.handleRemoteStream(stream),
+                onCallEnded: (data) => this.handleCallEnded(data),
+                onError: (error) => this.handleVideoCallError(error),
+                onControlsUpdate: (state) => this.handleControlsUpdate(state)
+            });
+        }
+
+        const reason = params.reason || '';
+        const pharmacistId = params.pharmacist_id || '';
+
+        // Check for iOS limitations
+        const iosLimitations = window.videoCallManager?.checkIOSLimitations() || { hasLimitations: false };
+
+        return `
+            <div class="video-call-page" id="video-call-page">
+                <!-- iOS Limitation Warning (Requirement 6.8) -->
+                ${iosLimitations.hasLimitations ? `
+                    <div id="vc-ios-warning" class="video-call-ios-warning">
+                        <div class="video-call-ios-warning-content">
+                            <div class="video-call-ios-warning-icon">
+                                <i class="fab fa-apple"></i>
+                            </div>
+                            <h3 class="video-call-ios-warning-title">ข้อจำกัดบน iOS</h3>
+                            <p class="video-call-ios-warning-text">${iosLimitations.message}</p>
+                            <p class="video-call-ios-warning-suggestion">${iosLimitations.suggestion}</p>
+                            <div class="video-call-ios-warning-actions">
+                                <button class="btn btn-primary" onclick="window.liffApp.dismissIOSWarning()">
+                                    <i class="fas fa-play"></i> ดำเนินการต่อ
+                                </button>
+                                <button class="btn btn-secondary" onclick="window.videoCallManager.openInExternalBrowser()">
+                                    <i class="fas fa-external-link-alt"></i> เปิดใน Safari
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
+                
+                <!-- Loading State -->
+                <div id="vc-loading" class="video-call-loading ${iosLimitations.hasLimitations ? 'hidden' : ''}">
+                    <div class="video-call-loading-content">
+                        <div class="video-call-loading-icon">
+                            <i class="fas fa-video"></i>
+                        </div>
+                        <p class="video-call-loading-text">กำลังเตรียมพร้อม...</p>
+                        <p class="video-call-loading-status" id="vc-loading-status">เข้าถึงกล้อง</p>
+                    </div>
+                </div>
+
+                <!-- Pre-Call Screen -->
+                <div id="vc-pre-call" class="video-call-pre-call hidden">
+                    <!-- Preview Video -->
+                    <video id="vc-preview-video" class="video-call-preview" autoplay playsinline muted></video>
+                    
+                    <!-- Gradient Overlay -->
+                    <div class="video-call-overlay"></div>
+                    
+                    <!-- Context Banner (if from prescription or drug interaction) -->
+                    ${reason ? `
+                        <div class="video-call-context-banner">
+                            <div class="video-call-context-icon">
+                                <i class="fas ${reason === 'prescription_approval' ? 'fa-prescription' : 'fa-exclamation-triangle'}"></i>
+                            </div>
+                            <div class="video-call-context-text">
+                                <p class="video-call-context-title">
+                                    ${reason === 'prescription_approval' ? 'ปรึกษาเรื่องยาตามใบสั่งแพทย์' : 'ปรึกษาเรื่องปฏิกิริยาระหว่างยา'}
+                                </p>
+                                <p class="video-call-context-desc">เภสัชกรจะช่วยตรวจสอบและให้คำแนะนำ</p>
+                            </div>
+                        </div>
+                    ` : ''}
+                    
+                    <!-- Pre-Call Controls -->
+                    <div class="video-call-pre-controls">
+                        <h1 class="video-call-title">
+                            <i class="fas fa-video"></i> Video Call
+                        </h1>
+                        <p class="video-call-subtitle">โทรหาเภสัชกรของเรา</p>
+                        
+                        <button class="video-call-start-btn" onclick="window.liffApp.startVideoCall(false)">
+                            <i class="fas fa-video"></i>
+                            <span>Video Call</span>
+                        </button>
+                        
+                        <button class="video-call-audio-btn" onclick="window.liffApp.startVideoCall(true)">
+                            <i class="fas fa-phone"></i>
+                            <span>Audio Only</span>
+                        </button>
+                    </div>
+                    
+                    <!-- Camera Switch Button -->
+                    <button class="video-call-switch-camera" onclick="window.liffApp.switchVideoCamera()">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+
+                <!-- In-Call Screen -->
+                <div id="vc-in-call" class="video-call-in-call hidden">
+                    <!-- Remote Video (Large) - Requirement 6.3 -->
+                    <video id="vc-remote-video" class="video-call-remote" autoplay playsinline></video>
+                    
+                    <!-- Local Video (PIP) -->
+                    <div class="video-call-pip" id="vc-local-pip">
+                        <video id="vc-local-video" class="video-call-local" autoplay playsinline muted></video>
+                    </div>
+                    
+                    <!-- Status Bar -->
+                    <div class="video-call-status-bar">
+                        <div class="video-call-status" id="vc-status">
+                            <span class="video-call-status-dot"></span>
+                            <span class="video-call-status-text" id="vc-status-text">กำลังเชื่อมต่อ...</span>
+                        </div>
+                        <div class="video-call-timer hidden" id="vc-timer">
+                            <span class="video-call-timer-dot">●</span>
+                            <span class="video-call-timer-text" id="vc-timer-text">00:00</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Call Controls - Requirements: 6.4, 6.5 -->
+                    <div class="video-call-controls">
+                        <button class="video-call-ctrl-btn" id="vc-btn-mute" onclick="window.liffApp.toggleVideoMute()" title="ปิด/เปิดไมค์">
+                            <i class="fas fa-microphone"></i>
+                            <span class="video-call-ctrl-label">ไมค์</span>
+                        </button>
+                        <button class="video-call-ctrl-btn video-call-end-btn" id="vc-btn-end" onclick="window.liffApp.showEndCallConfirm()" title="วางสาย">
+                            <i class="fas fa-phone-slash"></i>
+                            <span class="video-call-ctrl-label">วางสาย</span>
+                        </button>
+                        <button class="video-call-ctrl-btn" id="vc-btn-video" onclick="window.liffApp.toggleVideoCamera()" title="ปิด/เปิดกล้อง">
+                            <i class="fas fa-video"></i>
+                            <span class="video-call-ctrl-label">กล้อง</span>
+                        </button>
+                        <button class="video-call-ctrl-btn" id="vc-btn-switch" onclick="window.liffApp.switchVideoCamera()" title="สลับกล้อง">
+                            <i class="fas fa-sync-alt"></i>
+                            <span class="video-call-ctrl-label">สลับ</span>
+                        </button>
+                    </div>
+                    
+                    <!-- End Call Confirmation - Requirement 6.5 -->
+                    <div id="vc-end-confirm" class="video-call-end-confirm hidden">
+                        <div class="video-call-end-confirm-content">
+                            <p class="video-call-end-confirm-text">ต้องการวางสายหรือไม่?</p>
+                            <div class="video-call-end-confirm-actions">
+                                <button class="video-call-end-confirm-cancel" onclick="window.liffApp.hideEndCallConfirm()">
+                                    ยกเลิก
+                                </button>
+                                <button class="video-call-end-confirm-btn" onclick="window.liffApp.confirmEndCall()">
+                                    <i class="fas fa-phone-slash"></i> วางสาย
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- End Screen -->
+                <div id="vc-end-screen" class="video-call-end-screen hidden">
+                    <div class="video-call-end-content">
+                        <div class="video-call-end-icon">
+                            <i class="fas fa-check-circle"></i>
+                        </div>
+                        <h2 class="video-call-end-title" id="vc-end-title">สิ้นสุดการโทร</h2>
+                        <p class="video-call-end-duration-label">ระยะเวลา</p>
+                        <p class="video-call-end-duration" id="vc-end-duration">00:00</p>
+                        
+                        <button class="video-call-restart-btn" onclick="window.liffApp.resetVideoCall()">
+                            <i class="fas fa-redo"></i>
+                            <span>โทรอีกครั้ง</span>
+                        </button>
+                        <button class="video-call-close-btn" onclick="window.router.navigate('/')">
+                            <span>กลับหน้าหลัก</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Initialize video call page after render
+     * Requirements: 6.1, 6.6 - Pre-call permission check UI
+     */
+    async initVideoCallPage() {
+        if (!window.videoCallManager) {
+            console.error('VideoCallManager not available');
+            return;
+        }
+
+        // Initialize permission checker
+        if (window.permissionChecker) {
+            window.permissionChecker.init({
+                onPermissionsGranted: (stream) => this.handlePermissionsGranted(stream),
+                onPermissionsDenied: (result) => this.handlePermissionsDenied(result),
+                onPermissionChange: (type, state) => this.handlePermissionChange(type, state)
+            });
+        }
+
+        // Check WebRTC support first
+        if (window.permissionChecker && !window.permissionChecker.isWebRTCSupported()) {
+            this.showVideoCallError('เบราว์เซอร์นี้ไม่รองรับวิดีโอคอล กรุณาใช้เบราว์เซอร์อื่น');
+            return;
+        }
+
+        try {
+            this.updateVideoCallLoadingStatus('ตรวจสอบสิทธิ์การเข้าถึง...');
+
+            // Check current permission status
+            let permissionStatus = { camera: 'prompt', microphone: 'prompt' };
+            if (window.permissionChecker) {
+                permissionStatus = await window.permissionChecker.checkPermissionStatus();
+            }
+
+            // If permissions already denied, show permission check UI
+            if (permissionStatus.camera === 'denied' || permissionStatus.microphone === 'denied') {
+                this.showPermissionCheckUI(permissionStatus);
+                return;
+            }
+
+            this.updateVideoCallLoadingStatus('เข้าถึงกล้อง...');
+
+            // Request permissions and get local stream
+            if (window.permissionChecker) {
+                const result = await window.permissionChecker.requestPermissions();
+                if (!result.success) {
+                    // If device not found (no camera), still allow to proceed for testing
+                    if (result.errorType === 'not_found') {
+                        console.warn('📹 No camera found, proceeding without preview');
+                        this.handlePermissionsGranted(null);
+                        return;
+                    }
+                    this.showPermissionCheckUI(result);
+                    return;
+                }
+                // Stream is handled by onPermissionsGranted callback
+            } else {
+                // Fallback to direct request
+                try {
+                    const stream = await window.videoCallManager.getLocalStream();
+                    this.handlePermissionsGranted(stream);
+                } catch (e) {
+                    console.warn('📹 Could not get stream, proceeding anyway:', e);
+                    this.handlePermissionsGranted(null);
+                }
+            }
+
+        } catch (error) {
+            console.error('Video call init error:', error);
+            // Allow to proceed even with errors for testing
+            console.warn('📹 Proceeding to pre-call despite error');
+            this.handlePermissionsGranted(null);
+        }
+    }
+
+    /**
+     * Handle permissions granted
+     * @param {MediaStream} stream - The media stream
+     */
+    handlePermissionsGranted(stream) {
+        // Store stream in video call manager
+        if (window.videoCallManager && !window.videoCallManager.localStream) {
+            window.videoCallManager.localStream = stream;
+        }
+
+        // Show preview
+        const previewVideo = document.getElementById('vc-preview-video');
+        if (previewVideo && stream) {
+            previewVideo.srcObject = stream;
+        }
+
+        // Hide loading/permission UI, show pre-call
+        document.getElementById('vc-loading')?.classList.add('hidden');
+        document.getElementById('vc-permission-check')?.classList.add('hidden');
+        document.getElementById('vc-pre-call')?.classList.remove('hidden');
+    }
+
+    /**
+     * Handle permissions denied
+     * Requirements: 6.6 - Display instructions to enable permissions in device settings
+     * @param {Object} result - The error result
+     */
+    handlePermissionsDenied(result) {
+        const loadingEl = document.getElementById('vc-loading');
+        if (loadingEl && window.permissionChecker) {
+            loadingEl.innerHTML = window.permissionChecker.renderPermissionDeniedUI(result);
+            loadingEl.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Handle permission change
+     * @param {string} type - Permission type (camera/microphone)
+     * @param {string} state - New state
+     */
+    handlePermissionChange(type, state) {
+        console.log(`Permission ${type} changed to ${state}`);
+        // Could update UI here if needed
+    }
+
+    /**
+     * Show permission check UI
+     * Requirements: 6.1 - Display pre-call check UI for camera and microphone permissions
+     * @param {Object} status - Permission status
+     */
+    showPermissionCheckUI(status) {
+        const loadingEl = document.getElementById('vc-loading');
+        if (loadingEl && window.permissionChecker) {
+            loadingEl.innerHTML = window.permissionChecker.renderPermissionCheckUI(status);
+            loadingEl.classList.remove('hidden');
+        }
+        document.getElementById('vc-pre-call')?.classList.add('hidden');
+    }
+
+    /**
+     * Update loading status text
+     */
+    updateVideoCallLoadingStatus(text) {
+        const el = document.getElementById('vc-loading-status');
+        if (el) el.textContent = text;
+    }
+
+    /**
+     * Start video call
+     * @param {boolean} audioOnly - Start with audio only
+     */
+    async startVideoCall(audioOnly = false) {
+        if (!window.videoCallManager) return;
+
+        try {
+            // Hide pre-call, show in-call
+            document.getElementById('vc-pre-call')?.classList.add('hidden');
+            document.getElementById('vc-in-call')?.classList.remove('hidden');
+
+            // Set local video
+            const localVideo = document.getElementById('vc-local-video');
+            if (localVideo && window.videoCallManager.localStream) {
+                localVideo.srcObject = window.videoCallManager.localStream;
+            }
+
+            // Start the call
+            await window.videoCallManager.startCall(audioOnly);
+
+        } catch (error) {
+            console.error('Start call error:', error);
+            this.showVideoCallError(error.message || 'ไม่สามารถเริ่มการโทรได้');
+        }
+    }
+
+    /**
+     * Handle video call state change
+     */
+    handleVideoCallStateChange(state, oldState, data) {
+        console.log('Video call state:', state, data);
+
+        const statusText = document.getElementById('vc-status-text');
+        const timer = document.getElementById('vc-timer');
+        const statusDot = document.querySelector('.video-call-status-dot');
+
+        switch (state) {
+            case 'connecting':
+                if (statusText) statusText.textContent = 'กำลังเชื่อมต่อ...';
+                break;
+            case 'ringing':
+                if (statusText) statusText.textContent = 'กำลังโทร...';
+                break;
+            case 'active':
+                if (statusText) statusText.textContent = 'เชื่อมต่อแล้ว';
+                if (statusDot) statusDot.classList.add('active');
+                if (timer) timer.classList.remove('hidden');
+                this.startVideoCallTimer();
+                break;
+            case 'reconnecting':
+                if (statusText) statusText.textContent = 'กำลังเชื่อมต่อใหม่...';
+                break;
+            case 'ended':
+                this.showVideoCallEndScreen(data);
+                break;
+            case 'error':
+                this.showVideoCallError(data?.error?.message || 'เกิดข้อผิดพลาด');
+                break;
+        }
+    }
+
+    /**
+     * Handle remote stream received
+     * Requirements: 6.3 - Display remote video prominent
+     */
+    handleRemoteStream(stream) {
+        const remoteVideo = document.getElementById('vc-remote-video');
+        if (remoteVideo) {
+            remoteVideo.srcObject = stream;
+        }
+    }
+
+    /**
+     * Handle call ended
+     */
+    handleCallEnded(data) {
+        this.showVideoCallEndScreen(data);
+    }
+
+    /**
+     * Handle video call error
+     */
+    handleVideoCallError(error) {
+        this.showVideoCallError(error.message || 'เกิดข้อผิดพลาด');
+    }
+
+    /**
+     * Show video call error
+     */
+    showVideoCallError(message) {
+        // Hide all screens
+        document.getElementById('vc-loading')?.classList.add('hidden');
+        document.getElementById('vc-pre-call')?.classList.add('hidden');
+        document.getElementById('vc-in-call')?.classList.add('hidden');
+
+        // Show end screen with error
+        const endScreen = document.getElementById('vc-end-screen');
+        const endTitle = document.getElementById('vc-end-title');
+        const endIcon = document.querySelector('.video-call-end-icon i');
+
+        if (endScreen) endScreen.classList.remove('hidden');
+        if (endTitle) endTitle.textContent = message;
+        if (endIcon) {
+            endIcon.className = 'fas fa-exclamation-circle';
+            endIcon.parentElement.style.color = 'var(--danger)';
+        }
+    }
+
+    /**
+     * Show video call end screen
+     * Requirements: 6.7 - Display consultation summary
+     */
+    showVideoCallEndScreen(data = {}) {
+        // Stop timer
+        this.stopVideoCallTimer();
+
+        // Hide in-call, show end screen
+        document.getElementById('vc-in-call')?.classList.add('hidden');
+        const endScreen = document.getElementById('vc-end-screen');
+        if (endScreen) endScreen.classList.remove('hidden');
+
+        // Update duration
+        const duration = data.duration || window.videoCallManager?.callDuration || 0;
+        const durationEl = document.getElementById('vc-end-duration');
+        if (durationEl) {
+            durationEl.textContent = window.videoCallManager?.formatDuration(duration) || '00:00';
+        }
+
+        // Update title
+        const titleEl = document.getElementById('vc-end-title');
+        if (titleEl) {
+            titleEl.textContent = data.reason || 'สิ้นสุดการโทร';
+        }
+
+        // Store call ID for summary retrieval
+        this.lastCallId = data.callId;
+
+        // Show summary section if call was completed
+        if (duration > 0) {
+            this.showCallSummary(data.callId, duration);
+        }
+    }
+
+    /**
+     * Show call summary with duration and notes option
+     * Requirements: 6.7 - Record session duration and save consultation notes
+     */
+    async showCallSummary(callId, duration) {
+        const endContent = document.querySelector('.video-call-end-content');
+        if (!endContent) return;
+
+        // Add summary section if not exists
+        let summarySection = document.getElementById('vc-summary-section');
+        if (!summarySection) {
+            summarySection = document.createElement('div');
+            summarySection.id = 'vc-summary-section';
+            summarySection.className = 'video-call-summary-section';
+
+            // Insert before buttons
+            const restartBtn = endContent.querySelector('.video-call-restart-btn');
+            if (restartBtn) {
+                endContent.insertBefore(summarySection, restartBtn);
+            } else {
+                endContent.appendChild(summarySection);
+            }
+        }
+
+        // Format duration for display
+        const mins = Math.floor(duration / 60);
+        const secs = duration % 60;
+        const durationText = mins > 0 ? `${mins} นาที ${secs} วินาที` : `${secs} วินาที`;
+
+        summarySection.innerHTML = `
+            <div class="video-call-summary">
+                <div class="video-call-summary-item">
+                    <i class="fas fa-clock"></i>
+                    <span>ระยะเวลาการโทร: ${durationText}</span>
+                </div>
+                <div class="video-call-summary-item">
+                    <i class="fas fa-calendar"></i>
+                    <span>วันที่: ${new Date().toLocaleDateString('th-TH', {
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        })}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Toggle mute
+     */
+    toggleVideoMute() {
+        if (!window.videoCallManager) return;
+
+        const isMuted = window.videoCallManager.toggleMute();
+        const btn = document.getElementById('vc-btn-mute');
+
+        if (btn) {
+            btn.innerHTML = isMuted ? '<i class="fas fa-microphone-slash"></i><span class="video-call-ctrl-label">ไมค์</span>' : '<i class="fas fa-microphone"></i><span class="video-call-ctrl-label">ไมค์</span>';
+            btn.classList.toggle('active', isMuted);
+        }
+    }
+
+    /**
+     * Toggle video
+     */
+    toggleVideoCamera() {
+        if (!window.videoCallManager) return;
+
+        const isOff = window.videoCallManager.toggleVideo();
+        const btn = document.getElementById('vc-btn-video');
+
+        if (btn) {
+            btn.innerHTML = isOff ? '<i class="fas fa-video-slash"></i><span class="video-call-ctrl-label">กล้อง</span>' : '<i class="fas fa-video"></i><span class="video-call-ctrl-label">กล้อง</span>';
+            btn.classList.toggle('active', isOff);
+        }
+    }
+
+    /**
+     * Switch camera
+     */
+    async switchVideoCamera() {
+        if (!window.videoCallManager) return;
+
+        try {
+            const stream = await window.videoCallManager.switchCamera();
+
+            // Update preview video
+            const previewVideo = document.getElementById('vc-preview-video');
+            if (previewVideo) previewVideo.srcObject = stream;
+
+            // Update local video
+            const localVideo = document.getElementById('vc-local-video');
+            if (localVideo) localVideo.srcObject = stream;
+
+        } catch (error) {
+            console.error('Switch camera error:', error);
+            this.showToast('ไม่สามารถสลับกล้องได้', 'error');
+        }
+    }
+
+    /**
+     * End video call
+     */
+    async endVideoCall() {
+        if (!window.videoCallManager) return;
+        await window.videoCallManager.endCall();
+    }
+
+    /**
+     * Show end call confirmation
+     * Requirements: 6.5 - Display red confirmation button for End Call
+     */
+    showEndCallConfirm() {
+        const confirmEl = document.getElementById('vc-end-confirm');
+        if (confirmEl) {
+            confirmEl.classList.remove('hidden');
+        }
+    }
+
+    /**
+     * Hide end call confirmation
+     */
+    hideEndCallConfirm() {
+        const confirmEl = document.getElementById('vc-end-confirm');
+        if (confirmEl) {
+            confirmEl.classList.add('hidden');
+        }
+    }
+
+    /**
+     * Confirm and end call
+     * Requirements: 6.5 - Display red confirmation button for End Call
+     */
+    async confirmEndCall() {
+        this.hideEndCallConfirm();
+        await this.endVideoCall();
+    }
+
+    /**
+     * Dismiss iOS warning and continue
+     * Requirements: 6.8 - Handle iOS WebRTC limitations
+     */
+    dismissIOSWarning() {
+        const warningEl = document.getElementById('vc-ios-warning');
+        const loadingEl = document.getElementById('vc-loading');
+
+        if (warningEl) {
+            warningEl.classList.add('hidden');
+        }
+        if (loadingEl) {
+            loadingEl.classList.remove('hidden');
+        }
+
+        // Continue with initialization
+        this.initVideoCallPage();
+    }
+
+    /**
+     * Handle controls update from video call manager
+     */
+    handleControlsUpdate(state) {
+        // Update mute button
+        const muteBtn = document.getElementById('vc-btn-mute');
+        if (muteBtn) {
+            muteBtn.innerHTML = state.isMuted
+                ? '<i class="fas fa-microphone-slash"></i><span class="video-call-ctrl-label">ไมค์</span>'
+                : '<i class="fas fa-microphone"></i><span class="video-call-ctrl-label">ไมค์</span>';
+            muteBtn.classList.toggle('active', state.isMuted);
+        }
+
+        // Update video button
+        const videoBtn = document.getElementById('vc-btn-video');
+        if (videoBtn) {
+            videoBtn.innerHTML = state.isVideoOff
+                ? '<i class="fas fa-video-slash"></i><span class="video-call-ctrl-label">กล้อง</span>'
+                : '<i class="fas fa-video"></i><span class="video-call-ctrl-label">กล้อง</span>';
+            videoBtn.classList.toggle('active', state.isVideoOff);
+        }
+    }
+
+    /**
+     * Reset video call (start over)
+     */
+    async resetVideoCall() {
+        // Cleanup
+        if (window.videoCallManager) {
+            window.videoCallManager.cleanup();
+        }
+
+        // Reset UI
+        document.getElementById('vc-end-screen')?.classList.add('hidden');
+        document.getElementById('vc-loading')?.classList.remove('hidden');
+
+        // Reset icon
+        const endIcon = document.querySelector('.video-call-end-icon i');
+        if (endIcon) {
+            endIcon.className = 'fas fa-check-circle';
+            endIcon.parentElement.style.color = '';
+        }
+
+        // Re-initialize
+        await this.initVideoCallPage();
+    }
+
+    /**
+     * Start video call timer display
+     */
+    startVideoCallTimer() {
+        if (this.videoCallTimerInterval) return;
+
+        this.videoCallTimerInterval = setInterval(() => {
+            const duration = window.videoCallManager?.callDuration || 0;
+            const timerText = document.getElementById('vc-timer-text');
+            if (timerText) {
+                timerText.textContent = window.videoCallManager?.formatDuration(duration) || '00:00';
+            }
+        }, 1000);
+    }
+
+    /**
+     * Stop video call timer display
+     */
+    stopVideoCallTimer() {
+        if (this.videoCallTimerInterval) {
+            clearInterval(this.videoCallTimerInterval);
+            this.videoCallTimerInterval = null;
+        }
+    }
+
+    // ==================== Utility Methods ====================
+
+    /**
+     * Format number with commas
+     */
+    formatNumber(num) {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    /**
+     * Format currency
+     */
+    formatCurrency(amount) {
+        return `฿${this.formatNumber(amount)}`;
+    }
+
+    /**
+     * Escape HTML to prevent XSS
+     */
+    escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    /**
+     * Initialize Odoo Link Page
+     */
+    async initOdooLinkPage() {
+        const content = document.getElementById('odoo-link-content');
+        if (!content) return;
+
+        // Load the actual page content via iframe or fetch
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/liff/odoo-link.php`);
+            const html = await response.text();
+            content.innerHTML = html;
+        } catch (error) {
+            console.error('Error loading Odoo link page:', error);
+            content.innerHTML = `
+                <div class="error-state">
+                    <div class="error-icon error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <h2>เกิดข้อผิดพลาด</h2>
+                    <p>ไม่สามารถโหลดหน้านี้ได้</p>
+                    <button class="btn btn-primary" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i> กลับ
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Initialize Odoo Orders Page
+     */
+    async initOdooOrdersLegacyEmbedPage() {
+        const content = document.getElementById('odoo-orders-content');
+        if (!content) return;
+
+        // Load the actual page content via iframe or fetch
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/liff/odoo-orders.php`);
+            const html = await response.text();
+            content.innerHTML = html;
+        } catch (error) {
+            console.error('Error loading Odoo orders page:', error);
+            content.innerHTML = `
+                <div class="error-state">
+                    <div class="error-icon error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <h2>เกิดข้อผิดพลาด</h2>
+                    <p>ไม่สามารถโหลดหน้านี้ได้</p>
+                    <button class="btn btn-primary" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i> กลับ
+                    </button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Initialize Odoo Order Detail Page
+     */
+    async initOdooOrderDetailPage(params) {
+        const content = document.getElementById('odoo-order-detail-content');
+        if (!content) return;
+
+        const orderId = params.id || content.dataset.orderId;
+        if (!orderId) {
+            content.innerHTML = `
+                <div class="error-state">
+                    <div class="error-icon error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <h2>ไม่พบข้อมูล</h2>
+                    <p>ไม่พบเลขที่ออเดอร์</p>
+                    <button class="btn btn-primary" onclick="window.router.navigate('/odoo-orders')">
+                        <i class="fas fa-list"></i> ดูรายการออเดอร์
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) {
+            content.innerHTML = `<div class="error-state"><p>กรุณาเข้าสู่ระบบก่อน</p></div>`;
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-orders.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'detail',
+                    order_id: orderId,
+                    line_user_id: profile.userId,
+                    line_account_id: this.config.ACCOUNT_ID
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                this.renderOdooOrderDetailContent(content, result.data, orderId);
+            } else {
+                content.innerHTML = `
+                    <div class="error-state" style="text-align: center; padding: 40px 20px;">
+                        <i class="fas fa-exclamation-circle" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+                        <h3 style="color: #666; font-size: 16px; margin-bottom: 8px;">ไม่พบข้อมูล</h3>
+                        <p style="color: #999; font-size: 14px;">${result.error || 'ไม่สามารถโหลดข้อมูลออเดอร์ได้'}</p>
+                        <button onclick="window.liffApp.initOdooOrderDetailPage({id:'${orderId}'})" style="margin-top: 16px; padding: 10px 20px; background: #11B0A6; color: white; border: none; border-radius: 8px; cursor: pointer;">ลองใหม่</button>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading order detail:', error);
+            content.innerHTML = `
+                <div class="error-state" style="text-align: center; padding: 40px 20px;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #EF4444; margin-bottom: 16px;"></i>
+                    <h3 style="color: #666;">เกิดข้อผิดพลาด</h3>
+                    <p style="color: #999;">${error.message}</p>
+                    <button onclick="window.liffApp.initOdooOrderDetailPage({id:'${orderId}'})" style="margin-top: 16px; padding: 10px 20px; background: #11B0A6; color: white; border: none; border-radius: 8px; cursor: pointer;">ลองใหม่</button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Render Order Detail Content
+     */
+    renderOdooOrderDetailContent(container, order, orderId) {
+        const statusMap = { 'draft': 'ร่าง', 'sent': 'ส่งแล้ว', 'sale': 'ขายแล้ว', 'done': 'เสร็จสิ้น', 'cancel': 'ยกเลิก' };
+        const statusColorMap = { 'draft': '#6b7280', 'sent': '#1e40af', 'sale': '#065f46', 'done': '#065f46', 'cancel': '#991b1b' };
+        const paymentMap = { 'paid': 'ชำระแล้ว', 'partial': 'ชำระบางส่วน', 'not_paid': 'ยังไม่ชำระ', 'unpaid': 'ยังไม่ชำระ' };
+
+        const state = order.state || 'draft';
+        const statusText = statusMap[state] || state;
+        const statusColor = statusColorMap[state] || '#666';
+
+        const paymentState = order.payment_status?.payment_state || order.payment_state || 'not_paid';
+        const paymentText = paymentMap[paymentState] || paymentState;
+        const paymentColor = paymentState === 'paid' ? '#065f46' : paymentState === 'partial' ? '#92400e' : '#991b1b';
+
+        const customer = order.customer || {};
+        const orderLines = order.order_lines || order.order_line || [];
+
+        const subtotal = parseFloat(order.amount_untaxed || 0).toFixed(2);
+        const tax = parseFloat(order.amount_tax || 0).toFixed(2);
+        const total = parseFloat(order.amount_total || 0).toFixed(2);
+
+        const dateStr = order.date_order ? new Date(order.date_order).toLocaleDateString('th-TH', {
+            year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
+        }) : 'N/A';
+
+        let linesHtml = '';
+        if (orderLines.length > 0) {
+            orderLines.forEach(line => {
+                const productName = line.product_name || line.name || 'N/A';
+                const qty = parseFloat(line.product_uom_qty || line.qty || 0);
+                const price = parseFloat(line.price_unit || 0).toFixed(2);
+                const lineTotal = parseFloat(line.price_subtotal || 0).toFixed(2);
+                linesHtml += `
+                    <div style="display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid #f0f0f0;">
+                        <div style="width: 48px; height: 48px; background: #f5f5f5; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+                            <i class="fas fa-box" style="color: #ccc;"></i>
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 500; font-size: 14px; margin-bottom: 4px;">${this.escapeHtml(productName)}</div>
+                            <div style="font-size: 13px; color: #666;">จำนวน: ${qty} × ฿${price}</div>
+                            <div style="font-size: 14px; font-weight: 600; color: #11B0A6;">฿${lineTotal}</div>
+                        </div>
+                    </div>
+                `;
+            });
+        } else {
+            linesHtml = '<p style="color: #999; text-align: center; padding: 20px;">ไม่มีรายการสินค้า</p>';
+        }
+
+        const address = order.shipping_address || {};
+        const addressParts = [address.street, address.street2, address.city, address.state, address.zip, address.country].filter(Boolean);
+        const addressText = addressParts.length > 0 ? addressParts.join(', ') : 'ไม่มีข้อมูลที่อยู่';
+
+        container.innerHTML = `
+            <div style="background: white; padding: 20px; margin-bottom: 8px;">
+                <div style="font-size: 22px; font-weight: 700; color: #333; margin-bottom: 8px;">${order.name || 'N/A'}</div>
+                <div style="font-size: 14px; color: #666; margin-bottom: 12px;">${dateStr}</div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <span style="padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; background: ${statusColor}20; color: ${statusColor};">${statusText}</span>
+                    <span style="padding: 6px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; background: ${paymentColor}20; color: ${paymentColor};">${paymentText}</span>
+                </div>
+            </div>
+
+            <div style="background: white; padding: 20px; margin-bottom: 8px;">
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px;"><i class="fas fa-user" style="color: #11B0A6; margin-right: 8px;"></i>ข้อมูลลูกค้า</div>
+                <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
+                    <span style="color: #666; font-size: 14px;">ชื่อ</span>
+                    <span style="font-weight: 500; font-size: 14px;">${customer.name || order.partner_name || 'N/A'}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f0f0f0;">
+                    <span style="color: #666; font-size: 14px;">เบอร์โทร</span>
+                    <span style="font-weight: 500; font-size: 14px;">${customer.phone || 'N/A'}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 10px 0;">
+                    <span style="color: #666; font-size: 14px;">อีเมล</span>
+                    <span style="font-weight: 500; font-size: 14px;">${customer.email || 'N/A'}</span>
+                </div>
+            </div>
+
+            <div style="background: white; padding: 20px; margin-bottom: 8px;">
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px;"><i class="fas fa-map-marker-alt" style="color: #11B0A6; margin-right: 8px;"></i>ที่อยู่จัดส่ง</div>
+                <div style="font-size: 14px; color: #333; line-height: 1.6;">${this.escapeHtml(addressText)}</div>
+            </div>
+
+            <div style="background: white; padding: 20px; margin-bottom: 8px;">
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px;"><i class="fas fa-box" style="color: #11B0A6; margin-right: 8px;"></i>รายการสินค้า (${orderLines.length} รายการ)</div>
+                ${linesHtml}
+            </div>
+
+            <div style="background: white; padding: 20px; margin-bottom: 8px;">
+                <div style="font-size: 16px; font-weight: 600; margin-bottom: 12px;"><i class="fas fa-calculator" style="color: #11B0A6; margin-right: 8px;"></i>สรุปยอดรวม</div>
+                <div style="display: flex; justify-content: space-between; padding: 10px 0; font-size: 14px;">
+                    <span style="color: #666;">ยอดรวมสินค้า</span>
+                    <span style="font-weight: 500;">฿${subtotal}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 10px 0; font-size: 14px;">
+                    <span style="color: #666;">ภาษี</span>
+                    <span style="font-weight: 500;">฿${tax}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 14px 0; font-size: 16px; border-top: 2px solid #e0e0e0; margin-top: 8px;">
+                    <span style="font-weight: 600; color: #333;">ยอดรวมทั้งหมด</span>
+                    <span style="font-weight: 700; color: #11B0A6; font-size: 18px;">฿${total}</span>
+                </div>
+            </div>
+
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+                <button onclick="window.router.navigate('/odoo-order-tracking', { id: '${orderId}' })" style="padding: 14px 20px; background: #11B0A6; color: white; border: none; border-radius: 12px; font-size: 15px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <i class="fas fa-map-marker-alt"></i> ติดตามสถานะการจัดส่ง
+                </button>
+                <button onclick="window.liffApp.checkOdooPaymentStatus('${orderId}')" style="padding: 14px 20px; background: white; color: #11B0A6; border: 2px solid #11B0A6; border-radius: 12px; font-size: 15px; font-weight: 500; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                    <i class="fas fa-credit-card"></i> ตรวจสอบสถานะการชำระเงิน
+                </button>
+            </div>
+        `;
+    }
+
+    /**
+     * Check Payment Status for an Order
+     */
+    async checkOdooPaymentStatus(orderId) {
+        const profile = window.store.get('profile');
+        if (!profile?.userId || !orderId) {
+            alert('ไม่สามารถตรวจสอบสถานะการชำระเงินได้');
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-payment-status.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'check',
+                    line_user_id: profile.userId,
+                    order_id: orderId
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.payment_status) {
+                const status = result.payment_status;
+                const paymentMap = { 'paid': 'ชำระเงินแล้ว', 'partial': 'ชำระบางส่วน', 'not_paid': 'ยังไม่ชำระ', 'unpaid': 'ยังไม่ชำระ' };
+                const paymentState = status.payment_state || 'not_paid';
+                const paymentText = paymentMap[paymentState] || paymentState;
+                const amountPaid = parseFloat(status.amount_paid || 0).toFixed(2);
+                const amountDue = parseFloat(status.amount_due || 0).toFixed(2);
+
+                alert(`สถานะการชำระเงิน: ${paymentText}\n\nยอดที่ชำระแล้ว: ฿${amountPaid}\nยอดคงค้าง: ฿${amountDue}`);
+            } else {
+                alert(result.error || 'ไม่สามารถตรวจสอบสถานะการชำระเงินได้');
+            }
+        } catch (error) {
+            console.error('Payment status error:', error);
+            alert('เกิดข้อผิดพลาดในการตรวจสอบสถานะการชำระเงิน');
+        }
+    }
+
+    /**
+     * Initialize Odoo Order Tracking Page
+     * Delegates to loadOdooOrderTracking which calls API directly
+     */
+    initOdooOrderTrackingPage(params) {
+        const content = document.getElementById('odoo-order-tracking-content');
+        if (!content) return;
+
+        const orderId = params?.id || content.dataset.orderId;
+        if (!orderId) {
+            content.innerHTML = `
+                <div class="error-state" style="text-align: center; padding: 40px 20px;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+                    <h3 style="color: #666; font-size: 16px;">ไม่พบเลขที่ออเดอร์</h3>
+                    <button onclick="window.router.navigate('/odoo-orders')" style="margin-top: 16px; padding: 10px 20px; background: #11B0A6; color: white; border: none; border-radius: 8px; cursor: pointer;">
+                        <i class="fas fa-list"></i> ดูรายการออเดอร์
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        this.loadOdooOrderTracking(orderId);
+    }
+
+    /**
+     * Initialize Odoo Credit Status Page
+     * Calls API directly to fetch credit status data
+     */
+    async initOdooCreditStatusPage() {
+        const content = document.getElementById('odoo-credit-status-content');
+        if (!content) return;
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) {
+            content.innerHTML = `<div class="error-state" style="text-align: center; padding: 40px 20px;"><p style="color: #666;">กรุณาเข้าสู่ระบบก่อน</p></div>`;
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-invoices.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'credit_status',
+                    line_user_id: profile.userId,
+                    line_account_id: this.config.ACCOUNT_ID
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                this.renderOdooCreditStatusContent(content, result.data);
+            } else {
+                content.innerHTML = `
+                    <div class="error-state" style="text-align: center; padding: 40px 20px;">
+                        <i class="fas fa-exclamation-circle" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+                        <h3 style="color: #666; font-size: 16px; margin-bottom: 8px;">ไม่พบข้อมูล</h3>
+                        <p style="color: #999; font-size: 14px;">${result.error || 'ไม่สามารถโหลดข้อมูลสถานะเครดิตได้'}</p>
+                        <button onclick="window.liffApp.initOdooCreditStatusPage()" style="margin-top: 16px; padding: 10px 20px; background: #11B0A6; color: white; border: none; border-radius: 8px; cursor: pointer;">ลองใหม่</button>
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Error loading credit status:', error);
+            content.innerHTML = `
+                <div class="error-state" style="text-align: center; padding: 40px 20px;">
+                    <i class="fas fa-exclamation-triangle" style="font-size: 48px; color: #EF4444; margin-bottom: 16px;"></i>
+                    <h3 style="color: #666;">เกิดข้อผิดพลาด</h3>
+                    <p style="color: #999;">${error.message}</p>
+                    <button onclick="window.liffApp.initOdooCreditStatusPage()" style="margin-top: 16px; padding: 10px 20px; background: #11B0A6; color: white; border: none; border-radius: 8px; cursor: pointer;">ลองใหม่</button>
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Render Credit Status Content
+     */
+    renderOdooCreditStatusContent(container, data) {
+        const creditLimit = parseFloat(data.credit_limit || 0);
+        const creditUsed = parseFloat(data.credit_used || 0);
+        const creditAvailable = creditLimit - creditUsed;
+        const overdueAmount = parseFloat(data.overdue_amount || 0);
+
+        const usagePercent = creditLimit > 0 ? (creditUsed / creditLimit * 100) : 0;
+
+        let progressColor = '#11B0A6';
+        let alertHtml = '';
+
+        if (usagePercent >= 90) {
+            progressColor = '#ef4444';
+            alertHtml = `
+                <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; border-radius: 8px; margin-top: 16px;">
+                    <div style="font-size: 14px; font-weight: 600; color: #991b1b; margin-bottom: 4px;">⚠️ วงเงินใกล้หมด</div>
+                    <div style="font-size: 13px; color: #7f1d1d;">คุณใช้วงเงินเครดิตไปแล้ว ${usagePercent.toFixed(0)}% กรุณาชำระเงินเพื่อเพิ่มวงเงิน</div>
+                </div>
+            `;
+        } else if (usagePercent >= 75) {
+            progressColor = '#f59e0b';
+            alertHtml = `
+                <div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 16px; border-radius: 8px; margin-top: 16px;">
+                    <div style="font-size: 14px; font-weight: 600; color: #92400e; margin-bottom: 4px;">⚠️ วงเงินใกล้เต็ม</div>
+                    <div style="font-size: 13px; color: #78350f;">คุณใช้วงเงินเครดิตไปแล้ว ${usagePercent.toFixed(0)}%</div>
+                </div>
+            `;
+        }
+
+        if (overdueAmount > 0) {
+            alertHtml += `
+                <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; border-radius: 8px; margin-top: 16px;">
+                    <div style="font-size: 14px; font-weight: 600; color: #991b1b; margin-bottom: 4px;">⚠️ มียอดเกินกำหนดชำระ</div>
+                    <div style="font-size: 13px; color: #7f1d1d;">คุณมียอดเกินกำหนดชำระ ฿${overdueAmount.toFixed(2)} กรุณาชำระโดยเร็วที่สุด</div>
+                </div>
+            `;
+        }
+
+        container.innerHTML = `
+            <div style="background: white; margin: 16px; border-radius: 20px; padding: 24px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);">
+                <div style="text-align: center; margin-bottom: 24px;">
+                    <div style="font-size: 16px; color: #666; margin-bottom: 8px;">วงเงินเครดิตทั้งหมด</div>
+                    <div style="font-size: 36px; font-weight: 700; color: #11B0A6;">฿${creditLimit.toFixed(2)}</div>
+                </div>
+
+                <div style="margin: 24px 0;">
+                    <div style="display: flex; justify-content: space-between; font-size: 14px; color: #666; margin-bottom: 8px;">
+                        <span>ใช้ไปแล้ว</span>
+                        <span>${usagePercent.toFixed(0)}%</span>
+                    </div>
+                    <div style="width: 100%; height: 12px; background: #e0e0e0; border-radius: 6px; overflow: hidden;">
+                        <div style="height: 100%; width: ${Math.min(usagePercent, 100)}%; background: ${progressColor}; border-radius: 6px; transition: width 0.3s ease;"></div>
+                    </div>
+                </div>
+
+                <div style="display: flex; flex-direction: column; gap: 16px; margin-top: 24px; padding-top: 24px; border-top: 1px solid #e0e0e0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 15px; color: #666;">ใช้ไปแล้ว</span>
+                        <span style="font-size: 18px; font-weight: 600; color: #333;">฿${creditUsed.toFixed(2)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 15px; color: #666;">คงเหลือ</span>
+                        <span style="font-size: 18px; font-weight: 600; color: #11B0A6;">฿${creditAvailable.toFixed(2)}</span>
+                    </div>
+                    ${overdueAmount > 0 ? `
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span style="font-size: 15px; color: #666;">เกินกำหนดชำระ</span>
+                        <span style="font-size: 18px; font-weight: 600; color: #ef4444;">฿${overdueAmount.toFixed(2)}</span>
+                    </div>
+                    ` : ''}
+                </div>
+
+                ${alertHtml}
+            </div>
+        `;
+    }
+
+
+
+    /**
+     * Render Odoo Order Detail Page
+     * Requirements: US-4 - ดูรายละเอียดออเดอร์
+     */
+    // ==================== Odoo Integration ====================
+
+    /**
+     * Render Odoo Link Page
+     */
+    renderOdooLinkPage() {
+        // Initialize logic after render (via router hook or timeout)
+        setTimeout(() => this.initOdooLinkPage(), 100);
+
+        return `
+            <div class="page-container">
+                <div class="page-header">
+                    <button class="btn-back" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">เชื่อมต่อบัญชี Odoo</h1>
+                </div>
+                <div id="odoo-link-content" class="page-content" style="padding: 16px;">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p>กำลังโหลดข้อมูล...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Initialize Odoo Link Page
+     */
+    async initOdooLinkPage() {
+        const container = document.getElementById('odoo-link-content');
+        if (!container) return;
+
+        try {
+            const profile = window.store.get('profile');
+            if (!profile?.userId) {
+                container.innerHTML = `<div class="alert alert-error">กรุณาเข้าสู่ระบบก่อน</div>`;
+                return;
+            }
+
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-user-link.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'profile',
+                    line_user_id: profile.userId
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.renderOdooLinkedProfile(container, result.data);
+            } else {
+                this.renderOdooLinkForm(container);
+            }
+        } catch (error) {
+            console.error('Error init Odoo Link:', error);
+            container.innerHTML = `<div class="error-state"><p>เกิดข้อผิดพลาด: ${error.message}</p></div>`;
+        }
+    }
+
+    /**
+     * Render Odoo Link Form
+     */
+    renderOdooLinkForm(container) {
+        container.innerHTML = `
+            <div class="card" style="background: white; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.05);">
+                <p style="color: #666; font-size: 14px; margin-bottom: 20px; text-align: center;">
+                    เชื่อมต่อบัญชี LINE กับบัญชีลูกค้าใน Odoo เพื่อรับการแจ้งเตือนและดูข้อมูลออเดอร์
+                </p>
+
+                <div class="tabs" style="display: flex; gap: 8px; margin-bottom: 20px;">
+                    <button class="tab active" onclick="window.liffApp.switchOdooLinkTab('phone')" style="flex: 1; padding: 10px; border: none; background: #E0F2F1; color: #11B0A6; border-radius: 8px; font-weight: 600;">เบอร์โทร</button>
+                    <button class="tab" onclick="window.liffApp.switchOdooLinkTab('code')" style="flex: 1; padding: 10px; border: none; background: #f5f5f5; color: #666; border-radius: 8px;">รหัสลูกค้า</button>
+                    <button class="tab" onclick="window.liffApp.switchOdooLinkTab('email')" style="flex: 1; padding: 10px; border: none; background: #f5f5f5; color: #666; border-radius: 8px;">อีเมล</button>
+                </div>
+
+                <div id="tab-phone" class="tab-content">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <input type="tel" id="link-phone" class="form-control" placeholder="เบอร์โทรศัพท์ (เช่น 0812345678)" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px;">
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="window.liffApp.handleOdooLink('phone')" style="width: 100%; padding: 14px; background: #11B0A6; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600;">เชื่อมต่อด้วยเบอร์โทร</button>
+                </div>
+
+                <div id="tab-code" class="tab-content" style="display: none;">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <input type="text" id="link-code" class="form-control" placeholder="รหัสลูกค้า (เช่น C001234)" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px;">
+                    </div>
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <input type="tel" id="link-code-phone" class="form-control" placeholder="เบอร์โทรศัพท์ (ยืนยันตัวตน)" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px;">
+                        <small style="color: #666; font-size: 12px; margin-top: 4px; display: block;">ต้องเป็นเบอร์ที่ลงทะเบียนไว้กับรหัสลูกค้า</small>
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="window.liffApp.handleOdooLink('code')" style="width: 100%; padding: 14px; background: #11B0A6; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600;">เชื่อมต่อด้วยรหัสลูกค้า</button>
+                </div>
+
+                <div id="tab-email" class="tab-content" style="display: none;">
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <input type="email" id="link-email" class="form-control" placeholder="อีเมล (เช่น example@email.com)" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px;">
+                    </div>
+                    <button class="btn btn-primary btn-block" onclick="window.liffApp.handleOdooLink('email')" style="width: 100%; padding: 14px; background: #11B0A6; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: 600;">เชื่อมต่อด้วยอีเมล</button>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Switch Odoo Link Tab
+     */
+    switchOdooLinkTab(tab) {
+        document.querySelectorAll('#odoo-link-content .tab').forEach(t => {
+            t.classList.remove('active');
+            t.style.background = '#f5f5f5';
+            t.style.color = '#666';
+            t.style.fontWeight = 'normal';
+        });
+        document.querySelectorAll('#odoo-link-content .tab-content').forEach(c => c.style.display = 'none');
+
+        const btn = event.target;
+        btn.classList.add('active');
+        btn.style.background = '#E0F2F1';
+        btn.style.color = '#11B0A6';
+        btn.style.fontWeight = '600';
+
+        document.getElementById(`tab-${tab}`).style.display = 'block';
+    }
+
+    /**
+     * Handle Odoo Link Submission
+     */
+    async handleOdooLink(method) {
+        const profile = window.store.get('profile');
+        if (!profile?.userId) return;
+
+        let value;
+        let codePhone = null;
+
+        if (method === 'phone') {
+            value = document.getElementById('link-phone').value;
+        } else if (method === 'code') {
+            value = document.getElementById('link-code').value;
+            codePhone = document.getElementById('link-code-phone').value;
+        } else {
+            value = document.getElementById('link-email').value;
+        }
+
+        if (!value) {
+            this.showToast('กรุณากรอกข้อมูล', 'warning');
+            return;
+        }
+
+        if (method === 'code' && !codePhone) {
+            this.showToast('กรุณาระบุเบอร์โทรศัพท์เพื่อยืนยันตัวตน', 'warning');
+            return;
+        }
+
+        const btn = event.target;
+        const originalText = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = 'กำลังเชื่อมต่อ...';
+
+        try {
+            const body = {
+                action: 'link',
+                line_user_id: profile.userId,
+                account_id: this.config.ACCOUNT_ID
+            };
+
+            if (method === 'phone') {
+                body.phone = value.replace(/\D/g, '');
+            } else if (method === 'code') {
+                body.customer_code = value;
+                body.phone = codePhone ? codePhone.replace(/\D/g, '') : null;
+            } else {
+                body.email = value;
+            }
+
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-user-link.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            const text = await response.text();
+
+            let result;
+            try {
+                result = JSON.parse(text);
+            } catch (e) {
+                console.error('Invalid JSON response:', text);
+                if (response.status !== 200) {
+                    this.showToast(`Server Error (${response.status}): ${text.substring(0, 50)}...`, 'error');
+                }
+                throw new Error('Invalid server response');
+            }
+
+            if (result.success) {
+                this.showToast('เชื่อมต่อสำเร็จ!', 'success');
+                this.initOdooLinkPage(); // Access via this directly as method
+            } else {
+                this.showToast(result.error || 'ไม่สามารถเชื่อมต่อได้', 'error');
+                btn.disabled = false;
+                btn.innerText = originalText;
+            }
+        } catch (error) {
+            console.error('Link error:', error);
+            if (error.message !== 'Invalid server response') {
+                this.showToast('เกิดข้อผิดพลาดในการเชื่อมต่อ', 'error');
+            }
+            btn.disabled = false;
+            btn.innerText = originalText;
+        }
+    }
+
+    /**
+     * Render Linked Profile
+     */
+    renderOdooLinkedProfile(container, profile) {
+        console.log('Rendering Profile:', profile);
+
+        const linkedViaLabel = profile.linked_via === 'phone' ? 'เบอร์โทร' : profile.linked_via === 'customer_code' ? 'รหัสลูกค้า' : 'อีเมล';
+        const creditLimit = parseFloat(profile.credit_limit || 0);
+        const totalDue = parseFloat(profile.total_due || 0);
+        const creditRemaining = creditLimit - totalDue;
+        const creditPct = creditLimit > 0 ? Math.min((totalDue / creditLimit) * 100, 100) : 0;
+        const barColor = creditPct > 80 ? '#ef4444' : creditPct > 50 ? '#f59e0b' : '#11B0A6';
+
+        container.innerHTML = `
+                <!-- Profile Info -->
+                <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0;">
+                    <span style="color: #666; font-size: 14px;">ชื่อ</span>
+                    <span style="font-weight: 600; font-size: 14px;">${profile.partner_name || '-'}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0;">
+                    <span style="color: #666; font-size: 14px;">รหัสลูกค้า</span>
+                    <span style="font-weight: 600; font-size: 14px; font-family: monospace;">${profile.customer_code || '-'}</span>
+                </div>
+                ${profile.phone ? `
+                <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0;">
+                    <span style="color: #666; font-size: 14px;">เบอร์โทร</span>
+                    <span style="font-weight: 600; font-size: 14px;">${profile.phone}</span>
+                </div>` : ''}
+                ${profile.email ? `
+                <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0;">
+                    <span style="color: #666; font-size: 14px;">อีเมล</span>
+                    <span style="font-weight: 600; font-size: 14px;">${profile.email}</span>
+                </div>` : ''}
+                <div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #f0f0f0;">
+                    <span style="color: #666; font-size: 14px;">เชื่อมต่อด้วย</span>
+                    <span style="font-weight: 600; font-size: 14px;">${linkedViaLabel}</span>
+                </div>
+
+                <!-- Credit Status -->
+                ${creditLimit > 0 ? `
+                <div style="margin: 16px 0; padding: 16px; background: #f9fafb; border-radius: 12px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; text-align: center;">
+                        <div>
+                            <div style="font-size: 18px; font-weight: 700; color: #2563eb;">฿${creditLimit.toLocaleString()}</div>
+                            <div style="font-size: 11px; color: #9ca3af;">วงเงิน</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 18px; font-weight: 700; color: ${totalDue > 0 ? '#d97706' : '#9ca3af'};">฿${totalDue.toLocaleString()}</div>
+                            <div style="font-size: 11px; color: #9ca3af;">ค้างชำระ</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 18px; font-weight: 700; color: #16a34a;">฿${creditRemaining.toLocaleString()}</div>
+                            <div style="font-size: 11px; color: #9ca3af;">คงเหลือ</div>
+                        </div>
+                    </div>
+                    <div style="height: 6px; background: #e5e7eb; border-radius: 3px; margin-top: 12px; overflow: hidden;">
+                        <div style="height: 100%; width: ${creditPct}%; background: ${barColor}; border-radius: 3px; transition: width 0.5s;"></div>
+                    </div>
+                </div>` : ''}
+
+                <!-- Menu Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0;">
+                    <button onclick="window.router.navigate('/odoo-orders')" style="background: #f9f9f9; border: 1px solid #eee; border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-box-open" style="font-size: 24px; color: #11B0A6; margin-bottom: 8px;"></i>
+                        <div style="font-size: 13px; color: #333; font-weight: 600;">ประวัติสั่งซื้อ</div>
+                    </button>
+                    <button onclick="window.router.navigate('/odoo-orders')" style="background: #f9f9f9; border: 1px solid #eee; border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-shipping-fast" style="font-size: 24px; color: #11B0A6; margin-bottom: 8px;"></i>
+                        <div style="font-size: 13px; color: #333; font-weight: 600;">ติดตามพัสดุ</div>
+                    </button>
+                    <button onclick="window.router.navigate('/odoo-invoices')" style="background: #f9f9f9; border: 1px solid #eee; border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-file-invoice-dollar" style="font-size: 24px; color: #11B0A6; margin-bottom: 8px;"></i>
+                        <div style="font-size: 13px; color: #333; font-weight: 600;">ใบแจ้งหนี้</div>
+                    </button>
+                    <button onclick="window.router.navigate('/odoo-slip')" style="background: #f9f9f9; border: 1px solid #eee; border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-receipt" style="font-size: 24px; color: #11B0A6; margin-bottom: 8px;"></i>
+                        <div style="font-size: 13px; color: #333; font-weight: 600;">แจ้งโอนเงิน</div>
+                    </button>
+                    <button onclick="window.router.navigate('/odoo-credit-status')" style="background: #f9f9f9; border: 1px solid #eee; border-radius: 12px; padding: 16px; text-align: center; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-wallet" style="font-size: 24px; color: #11B0A6; margin-bottom: 8px;"></i>
+                        <div style="font-size: 13px; color: #333; font-weight: 600;">สถานะเครดิต</div>
+                    </button>
+                </div>
+
+                <!-- Recent Orders -->
+                <div style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <span style="font-size: 15px; font-weight: 600; color: #333;">🛒 ออเดอร์ล่าสุด</span>
+                        <span id="odoo-link-orders-count" style="font-size: 12px; color: #9ca3af;"></span>
+                    </div>
+                    <div id="odoo-link-orders" style="color: #9ca3af; text-align: center; padding: 12px; font-size: 13px;">กำลังโหลด...</div>
+                </div>
+
+                <!-- Webhook Events -->
+                <div style="margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <span style="font-size: 15px; font-weight: 600; color: #333;">📡 Webhook Events</span>
+                        <span id="odoo-link-wh-count" style="font-size: 12px; color: #9ca3af;"></span>
+                    </div>
+                    <div id="odoo-link-webhooks" style="color: #9ca3af; text-align: center; padding: 12px; font-size: 13px;">กำลังโหลด...</div>
+                </div>
+
+                <!-- Notification Toggle -->
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 16px; background: #f9fafb; border-radius: 8px; margin-bottom: 20px;">
+                    <span style="font-size: 14px; color: #333;">รับการแจ้งเตือน</span>
+                    <label class="toggle-switch" style="position: relative; width: 48px; height: 28px; display: inline-block;">
+                        <input type="checkbox" id="notif-toggle" ${profile.notification_enabled ? 'checked' : ''} onchange="window.liffApp.toggleOdooNotification(this.checked)" style="opacity: 0; width: 0; height: 0;">
+                        <span class="slider" style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 28px;"></span>
+                    </label>
+                    <style>
+                        input:checked + .slider { background-color: #11B0A6; }
+                        input:checked + .slider:before { transform: translateX(20px); }
+                        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+                    </style>
+                </div>
+
+                <button class="btn btn-outline-danger btn-block" onclick="window.liffApp.handleOdooUnlink()" style="width: 100%; padding: 14px; border: 1px solid #ef4444; color: #ef4444; background: white; border-radius: 8px; font-size: 16px; font-weight: 600;">
+                    ยกเลิกการเชื่อมต่อ
+                </button>
+            </div>
+        `;
+
+        // Load orders and webhooks async
+        this.loadOdooLinkOrders();
+        this.loadOdooLinkWebhooks();
+    }
+
+    /**
+     * Load recent orders for Odoo Link page
+     */
+    async loadOdooLinkOrders() {
+        const el = document.getElementById('odoo-link-orders');
+        const countEl = document.getElementById('odoo-link-orders-count');
+        if (!el) return;
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) { el.innerHTML = ''; return; }
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-user-link.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'orders', line_user_id: profile.userId, limit: 5 })
+            });
+            const result = await response.json();
+
+            if (!result.success) {
+                el.innerHTML = `<div style="color:#d97706;font-size:13px;">⚠️ ${result.error || 'ไม่สามารถโหลดได้'}</div>`;
+                return;
+            }
+
+            console.log('Orders API result.data:', JSON.stringify(result.data));
+
+            // Extract orders array robustly
+            let orders = [];
+            const d = result.data;
+            if (Array.isArray(d)) {
+                orders = d;
+            } else if (d && Array.isArray(d.orders)) {
+                orders = d.orders;
+            } else if (d && Array.isArray(d.result)) {
+                orders = d.result;
+            } else if (d && d.result && Array.isArray(d.result.orders)) {
+                orders = d.result.orders;
+            } else if (d && Array.isArray(d.data)) {
+                orders = d.data;
+            }
+
+            const total = d?.total || orders.length;
+            if (countEl) countEl.textContent = total + ' รายการ';
+
+            if (orders.length === 0) {
+                const debugInfo = d?.debug ? ` (${d.debug}, keys: ${JSON.stringify(d.raw_keys)})` : '';
+                el.innerHTML = `<div style="padding:16px;text-align:center;color:#9ca3af;font-size:13px;">📦 ยังไม่มีออเดอร์${debugInfo}</div>`;
+                return;
+            }
+
+            const stateColors = { draft:'#6b7280', sent:'#2563eb', sale:'#16a34a', done:'#16a34a', cancel:'#dc2626' };
+            const stateBgs = { draft:'#f3f4f6', sent:'#dbeafe', sale:'#dcfce7', done:'#dcfce7', cancel:'#fee2e2' };
+            const stateLabels = { draft:'ร่าง', sent:'ส่งแล้ว', sale:'ยืนยัน', done:'เสร็จสิ้น', cancel:'ยกเลิก' };
+
+            let html = '';
+            orders.forEach(o => {
+                const name = o.name || o.order_name || '#' + (o.id || '');
+                const amount = parseFloat(o.amount_total || 0);
+                const state = o.state || 'draft';
+                const label = o.state_display || stateLabels[state] || state;
+                const date = o.date_order ? new Date(o.date_order).toLocaleDateString('th-TH', {day:'2-digit', month:'short'}) : '';
+                html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#f9fafb;border-radius:10px;margin-bottom:6px;cursor:pointer;" onclick="window.router.navigate('/odoo-order-detail',{order_id:${o.id || 0}})">
+                    <div>
+                        <div style="font-weight:600;font-size:14px;color:#111827;">${name}</div>
+                        <div style="font-size:12px;color:#9ca3af;margin-top:2px;">${date}</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div style="font-weight:700;font-size:14px;color:#16a34a;">฿${amount.toLocaleString()}</div>
+                        <span style="display:inline-block;padding:2px 8px;border-radius:50px;font-size:11px;font-weight:500;background:${stateBgs[state]||'#f3f4f6'};color:${stateColors[state]||'#6b7280'};margin-top:2px;">${label}</span>
+                    </div>
+                </div>`;
+            });
+            el.innerHTML = html;
+        } catch (err) {
+            console.error('loadOdooLinkOrders error:', err);
+            el.innerHTML = `<div style="color:#d97706;font-size:13px;">⚠️ ${err.message}</div>`;
+        }
+    }
+
+    /**
+     * Load webhook events for Odoo Link page
+     */
+    async loadOdooLinkWebhooks() {
+        const el = document.getElementById('odoo-link-webhooks');
+        const countEl = document.getElementById('odoo-link-wh-count');
+        if (!el) return;
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) { el.innerHTML = ''; return; }
+
+        const eventIcons = {
+            'order.validated':'✅','order.picker_assigned':'👤','order.picking':'📦',
+            'order.picked':'✅','order.packing':'📦','order.packed':'✅',
+            'order.to_delivery':'🚚','order.in_delivery':'🚚','order.delivered':'✅',
+            'delivery.departed':'🚚','delivery.completed':'✅',
+            'payment.confirmed':'💰','payment.done':'✅',
+            'invoice.created':'📄','invoice.overdue':'⚠️'
+        };
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-webhooks-dashboard.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'list', search: profile.userId, limit: 10 })
+            });
+            const result = await response.json();
+
+            if (!result.success) {
+                el.innerHTML = `<div style="color:#d97706;font-size:13px;">⚠️ ${result.error || 'ไม่สามารถโหลดได้'}</div>`;
+                return;
+            }
+
+            const webhooks = result.data?.webhooks || [];
+            const total = result.data?.total || webhooks.length;
+            if (countEl) countEl.textContent = total + ' รายการ';
+
+            if (webhooks.length === 0) {
+                el.innerHTML = '<div style="padding:16px;text-align:center;color:#9ca3af;font-size:13px;">📡 ยังไม่มี Webhook Events</div>';
+                return;
+            }
+
+            let html = '';
+            webhooks.forEach(w => {
+                const icon = eventIcons[w.event_type] || '📌';
+                const stateDisplay = (w.new_state_display && w.new_state_display !== 'null') ? w.new_state_display : (w.event_type || '').split('.').pop();
+                const orderName = (w.order_name && w.order_name !== 'null') ? w.order_name : '';
+                const time = w.processed_at ? new Date(w.processed_at).toLocaleString('th-TH', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'}) : '';
+                const badgeBg = w.status === 'success' ? '#d1fae5' : '#fee2e2';
+                const badgeColor = w.status === 'success' ? '#065f46' : '#991b1b';
+                const badgeText = w.status === 'success' ? 'OK' : 'FAIL';
+                html += `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:#f9fafb;border-radius:8px;margin-bottom:4px;font-size:13px;">
+                    <span style="font-size:16px;flex-shrink:0;">${icon}</span>
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-weight:500;color:#111827;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${stateDisplay} ${orderName ? '<span style="color:#11B0A6;">' + orderName + '</span>' : ''}</div>
+                        <div style="font-size:11px;color:#9ca3af;">${time}</div>
+                    </div>
+                    <span style="padding:2px 6px;border-radius:50px;font-size:10px;font-weight:600;background:${badgeBg};color:${badgeColor};flex-shrink:0;">${badgeText}</span>
+                </div>`;
+            });
+            el.innerHTML = html;
+        } catch (err) {
+            console.error('loadOdooLinkWebhooks error:', err);
+            el.innerHTML = `<div style="color:#d97706;font-size:13px;">⚠️ ${err.message}</div>`;
+        }
+    }
+
+    /**
+     * Toggle Notification
+     */
+    async toggleOdooNotification(enabled) {
+        const profile = window.store.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-user-link.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'notification',
+                    line_user_id: profile.userId,
+                    enabled: enabled
+                })
+            });
+            const result = await response.json();
+            if (result.success) {
+                this.showToast(result.data.message, 'success');
+            } else {
+                this.showToast(result.error, 'error');
+                document.getElementById('notif-toggle').checked = !enabled;
+            }
+        } catch (error) {
+            console.error('Toggle error:', error);
+            document.getElementById('notif-toggle').checked = !enabled;
+            this.showToast('เกิดข้อผิดพลาด', 'error');
+        }
+    }
+
+    /**
+     * Unlink Account
+     */
+    async handleOdooUnlink() {
+        if (!confirm('ต้องการยกเลิกการเชื่อมต่อบัญชีหรือไม่?')) return;
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-user-link.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'unlink',
+                    line_user_id: profile.userId
+                })
+            });
+            const result = await response.json();
+            if (result.success) {
+                this.showToast(result.data.message, 'success');
+                this.initOdooLinkPage();
+            } else {
+                this.showToast(result.error, 'error');
+            }
+        } catch (error) {
+            console.error('Unlink error:', error);
+            this.showToast('เกิดข้อผิดพลาด', 'error');
+        }
+    }
+
+    /**
+     * Render Odoo Orders Page
+     */
+    renderOdooOrdersPage() {
+        // Initialize logic
+        setTimeout(() => this.initOdooOrdersPage(), 100);
+
+        return `
+            <div class="page-container">
+                <div class="page-header">
+                    <button class="btn-back" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">ประวัติคำสั่งซื้อ</h1>
+                </div>
+                <div class="filters-section" style="background: white; padding: 16px; margin-bottom: 8px;">
+                    <div class="search-box" style="position: relative; margin-bottom: 12px;">
+                        <i class="fas fa-search" style="position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #999;"></i>
+                        <input type="text" id="order-search" placeholder="ค้นหาเลขที่ออเดอร์..." onkeyup="window.liffApp.handleOrderSearch(this.value)"
+                            style="width: 100%; padding: 12px 16px 12px 40px; border: 1px solid #e0e0e0; border-radius: 10px; font-size: 15px;">
+                    </div>
+                    <div class="filter-row" style="display: flex; gap: 8px;">
+                        <select id="order-state-filter" onchange="window.liffApp.loadOdooOrders()" 
+                            style="flex: 1; padding: 10px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; background: white;">
+                            <option value="">ทุกสถานะ</option>
+                            <option value="draft">ใบเสนอราคา</option>
+                            <option value="sale">คำสั่งซื้อ</option>
+                            <option value="done">สำเร็จ</option>
+                            <option value="cancel">ยกเลิก</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="odoo-orders-list" class="orders-list" style="padding: 16px; padding-top: 8px;">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p>กำลังโหลดข้อมูล...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Init Odoo Orders Page
+     */
+    initOdooOrdersPage() {
+        this.loadOdooOrders();
+    }
+
+    /**
+     * Handle order search
+     */
+    handleOrderSearch(keyword) {
+        if (this.orderSearchTimeout) clearTimeout(this.orderSearchTimeout);
+        this.orderSearchTimeout = setTimeout(() => {
+            this.loadOdooOrders({ search: keyword });
+        }, 500);
+    }
+
+    /**
+     * Load Orders
+     */
+    async loadOdooOrders(params = {}) {
+        const container = document.getElementById('odoo-orders-list');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div class="loading-state">
+                <div class="loading-spinner"></div>
+                <p>กำลังโหลดข้อมูล...</p>
+            </div>
+        `;
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) {
+            container.innerHTML = `<div class="alert alert-error">กรุณาเข้าสู่ระบบก่อน</div>`;
+            return;
+        }
+
+        const state = document.getElementById('order-state-filter')?.value || '';
+        const search = params.search || document.getElementById('order-search')?.value || '';
+
+        try {
+            const body = {
+                action: 'list',
+                line_user_id: profile.userId,
+                line_account_id: this.config.ACCOUNT_ID,
+                state: state,
+                limit: 20
+            };
+            if (search) body.search = search;
+
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-orders.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.renderOdooOrderList(container, result.data);
+            } else {
+                container.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 40px 20px;">
+                        <i class="fas fa-exclamation-circle" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+                        <h3 style="color: #666; font-size: 16px; margin-bottom: 8px;">ไม่พบข้อมูล</h3>
+                        <p style="color: #999; font-size: 14px;">${result.error || 'กรุณาเชื่อมต่อบัญชี Odoo ก่อน'}</p>
+                        ${result.error?.includes('เชื่อมต่อ') ?
+                        `<button class="btn btn-primary" onclick="window.router.navigate('/odoo-link')" style="margin-top: 16px; padding: 10px 20px; background: #11B0A6; color: white; border: none; border-radius: 8px;">เชื่อมต่อบัญชี</button>`
+                        : ''}
+                    </div>
+                `;
+            }
+        } catch (error) {
+            console.error('Load orders error:', error);
+            container.innerHTML = `<div class="error-state"><p>เกิดข้อผิดพลาด: ${error.message}</p></div>`;
+        }
+    }
+
+    /**
+     * Render Order List
+     */
+    renderOdooOrderList(container, data) {
+        console.log('Rendering orders:', data);
+        // Handle various response shapes:
+        // - flat array: [...]
+        // - {orders: [...]}
+        // - {success, data: {orders:[...]}, meta:{}} (double-wrapped from Odoo)
+        let orders = [];
+        if (Array.isArray(data)) {
+            orders = data;
+        } else if (data?.orders && Array.isArray(data.orders)) {
+            orders = data.orders;
+        } else if (data?.data?.orders && Array.isArray(data.data.orders)) {
+            orders = data.data.orders;
+        } else if (data?.result && Array.isArray(data.result)) {
+            orders = data.result;
+        }
+
+        if (!orders || orders.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state" style="text-align: center; padding: 40px 20px;">
+                    <i class="fas fa-box-open" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+                    <h3 style="color: #666; font-size: 16px;">ไม่พบประวัติคำสั่งซื้อ</h3>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+        orders.forEach(order => {
+            const safeOrderId = order.id ?? order.order_id ?? '';
+            const parsedDate = order.date_order ? new Date(order.date_order) : null;
+            const date = parsedDate && !Number.isNaN(parsedDate.getTime())
+                ? parsedDate.toLocaleDateString('th-TH', {
+                year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                })
+                : '-';
+
+            let statusColor = '#666';
+            let statusText = order.state;
+
+            if (order.state === 'sale' || order.state === 'done') {
+                statusColor = '#10B981';
+                statusText = 'สำเร็จ';
+            } else if (order.state === 'cancel') {
+                statusColor = '#EF4444';
+                statusText = 'ยกเลิก';
+            } else {
+                statusColor = '#F59E0B';
+                statusText = 'รอชำระ/ยืนยัน';
+            }
+
+            html += `
+                <div class="order-card" onclick="window.router.navigate('/odoo-order-detail', { id: '${safeOrderId}' })" style="background: white; border-radius: 12px; padding: 16px; margin-bottom: 12px; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <span style="font-weight: 600; color: #333;">${order.name}</span>
+                        <span style="color: ${statusColor}; font-weight: 500; font-size: 13px;">${statusText}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; color: #666;">
+                        <span>${date}</span>
+                        <span>${order.amount_total} ${order.currency_id?.[1] || 'THB'}</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    renderOdooOrderDetailPage(params) {
+        const orderId = params.id || '';
+        return `
+            <div class="page-container">
+                <div class="page-header">
+                    <button class="btn-back" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">รายละเอียดออเดอร์</h1>
+                </div>
+                <div id="odoo-order-detail-content" class="page-content" data-order-id="${this.escapeHtml(orderId)}">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p>กำลังโหลด...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render Odoo Order Tracking Page
+     * Requirements: US-5 - ติดตามสถานะออเดอร์
+     */
+    renderOdooOrderTrackingPage(params) {
+        const orderId = params.id || '';
+        return `
+            <div class="page-container">
+                <div class="page-header">
+                    <button class="btn-back" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">ติดตามออเดอร์</h1>
+                </div>
+                <div id="odoo-order-tracking-content" class="page-content" data-order-id="${this.escapeHtml(orderId)}">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p>กำลังโหลด...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render Odoo Invoices Page
+     * Requirements: US-6 - ดูรายการใบแจ้งหนี้
+     */
+    renderOdooInvoicesPage() {
+        return `
+            <div class="page-container">
+                <div class="page-header">
+                    <button class="btn-back" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">ใบแจ้งหนี้ Odoo</h1>
+                </div>
+                <div id="odoo-invoices-content" class="page-content">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p>กำลังโหลด...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render Odoo Credit Status Page
+     * Requirements: US-7 - ดูสถานะวงเงินเครดิต
+     */
+    renderOdooCreditStatusPage() {
+        return `
+            <div class="page-container">
+                <div class="page-header">
+                    <button class="btn-back" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">สถานะวงเงินเครดิต</h1>
+                </div>
+                <div id="odoo-credit-status-content" class="page-content">
+                    <div class="loading-state">
+                        <div class="loading-spinner"></div>
+                        <p>กำลังโหลด...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Init Odoo Invoices Page
+     */
+    initOdooInvoicesPage() {
+        this.loadOdooInvoices();
+    }
+
+    /**
+     * Load Invoices
+     */
+    async loadOdooInvoices() {
+        const container = document.getElementById('odoo-invoices-content');
+        if (!container) return;
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) {
+            container.innerHTML = `<div class="alert alert-error">กรุณาเข้าสู่ระบบก่อน</div>`;
+            return;
+        }
+
+        try {
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-invoices.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'list',
+                    line_user_id: profile.userId,
+                    line_account_id: this.config.ACCOUNT_ID,
+                    limit: 20
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                // Handle wrapped response
+                const invoices = Array.isArray(result.data) ? result.data : (result.data?.invoices || []);
+
+                if (invoices.length > 0) {
+                    let html = '';
+                    invoices.forEach(inv => {
+                        const date = new Date(inv.date).toLocaleDateString('th-TH', {
+                            year: 'numeric', month: 'short', day: 'numeric'
+                        });
+
+                        let statusColor = '#666';
+                        let statusText = inv.state;
+
+                        if (inv.state === 'posted') {
+                            if (inv.payment_state === 'paid') {
+                                statusColor = '#10B981';
+                                statusText = 'ชำระแล้ว';
+                            } else {
+                                statusColor = '#F59E0B';
+                                statusText = 'ค้างชำระ';
+                            }
+                        } else if (inv.state === 'cancel') {
+                            statusColor = '#EF4444';
+                            statusText = 'ยกเลิก';
+                        } else {
+                            statusText = 'ฉบับร่าง';
+                        }
+
+                        html += `
+                        <div class="card" style="margin-bottom: 12px; padding: 16px;">
+                            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                                <span style="font-weight: 600;">${inv.name}</span>
+                                <span style="color: ${statusColor}; font-weight: 500;">${statusText}</span>
+                            </div>
+                            <div style="display: flex; justify-content: space-between; font-size: 13px; color: #666;">
+                                <span>${date}</span>
+                                <span>${inv.amount_total} ${inv.currency_id?.[1] || 'THB'}</span>
+                            </div>
+                        </div>
+                    `;
+                    });
+                    container.innerHTML = html;
+                } else {
+                    container.innerHTML = `
+                    <div class="empty-state" style="text-align: center; padding: 40px 20px;">
+                        <i class="fas fa-file-invoice-dollar" style="font-size: 48px; color: #ccc; margin-bottom: 16px;"></i>
+                        <h3 style="color: #666; font-size: 16px;">ไม่พบใบแจ้งหนี้</h3>
+                    </div>
+                `;
+                }
+            }
+        } catch (error) {
+            console.error('Load invoices error:', error);
+            container.innerHTML = `<div class="error-state"><p>เกิดข้อผิดพลาด: ${error.message}</p></div>`;
+        }
+    }
+
+
+
+    /**
+     * Load Order Tracking
+     */
+    async loadOdooOrderTracking(orderId) {
+        const container = document.getElementById('odoo-order-tracking-content');
+        if (!container) return;
+
+        const profile = window.store.get('profile');
+        if (!profile?.userId) return;
+
+        try {
+            // Using odoo-orders.php with action=tracking
+            const response = await fetch(`${this.config.BASE_URL}/api/odoo-orders.php`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'tracking',
+                    order_id: orderId,
+                    line_user_id: profile.userId,
+                    line_account_id: this.config.ACCOUNT_ID
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.data) {
+                // Handle wrapped response
+                const tracks = Array.isArray(result.data) ? result.data : (result.data?.tracking || []);
+
+                if (tracks.length === 0) {
+                    container.innerHTML = `<div class="error-state"><p>ไม่พบประวัติการติดตาม</p></div>`;
+                    return;
+                }
+
+                // Render timeline
+                let html = '<div class="timeline" style="position: relative; padding-left: 20px; border-left: 2px solid #e0e0e0; margin-left: 10px;">';
+
+                tracks.forEach(track => {
+                    const date = new Date(track.date).toLocaleString('th-TH');
+                    html += `
+                        <div class="timeline-item" style="position: relative; margin-bottom: 24px; padding-left: 20px;">
+                            <div class="timeline-dot" style="position: absolute; left: -29px; top: 0; width: 16px; height: 16px; border-radius: 50%; background: #11B0A6; border: 2px solid white;"></div>
+                            <div style="font-weight: 600; font-size: 14px; margin-bottom: 4px;">${track.stage || track.name}</div>
+                            <div style="font-size: 12px; color: #666;">${date}</div>
+                            ${track.description ? `<div style="font-size: 13px; color: #444; margin-top: 4px;">${track.description}</div>` : ''}
+                        </div>
+                     `;
+                });
+
+                html += '</div>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = `<div class="error-state"><p>${result.error || 'ไม่พบข้อมูลการติดตาม'}</p></div>`;
+            }
+        } catch (error) {
+            console.error('Load tracking error:', error);
+            container.innerHTML = `<div class="error-state"><p>เกิดข้อผิดพลาด: ${error.message}</p></div>`;
+        }
+    }
+
+    /**
+     * Render Odoo Slip Page
+     */
+    renderOdooSlipPage() {
+        return `
+            <div class="page-container">
+                <div class="page-header">
+                    <button class="btn-back" onclick="window.router.back()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="page-title">แจ้งโอนเงิน</h1>
+                </div>
+                <div id="odoo-slip-content" class="page-content" style="padding: 20px;">
+                    <form id="slip-form" onsubmit="window.liffApp.handleSlipUpload(event)">
+                        <div style="text-align: center; margin-bottom: 24px;">
+                            <div id="slip-preview-container" style="width: 100%; height: 200px; background: #f5f5f5; border: 2px dashed #ddd; border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;">
+                                <img id="slip-preview" style="max-width: 100%; max-height: 100%; display: none;">
+                                <div id="slip-placeholder" style="text-align: center;">
+                                    <i class="fas fa-camera" style="font-size: 32px; color: #ccc; margin-bottom: 8px;"></i>
+                                    <p style="color: #999; font-size: 14px;">แตะเพื่ออัพโหลดรูปภาพ</p>
+                                </div>
+                                <input type="file" id="slip-file" accept="image/*" style="opacity: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: pointer;" onchange="window.liffApp.previewSlipImage(this)">
+                            </div>
+                        </div>
+                        
+                        <div class="form-group" style="margin-bottom: 16px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500;">จำนวนเงิน</label>
+                            <input type="number" step="0.01" id="slip-amount" class="form-control" placeholder="0.00" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+
+                        <div class="form-group" style="margin-bottom: 24px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500;">วันที่โอน</label>
+                            <input type="datetime-local" id="slip-date" class="form-control" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-block" style="width: 100%; padding: 14px; background: #11B0A6; color: white; border: none; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                            ส่งหลักฐานการโอนเงิน
+                        </button>
+                    </form>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Init Slip Page
+     */
+    initOdooSlipPage() {
+        // Set default date to now
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        const hours = String(now.getHours()).padStart(2, '0');
+        const minutes = String(now.getMinutes()).padStart(2, '0');
+
+        const dateInput = document.getElementById('slip-date');
+        if (dateInput) {
+            dateInput.value = `${year}-${month}-${day}T${hours}:${minutes}`;
+        }
+    }
+
+    /**
+     * Preview Slip Image
+     */
+    previewSlipImage(input) {
+        const preview = document.getElementById('slip-preview');
+        const placeholder = document.getElementById('slip-placeholder');
+
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+
+            reader.onload = function (e) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+                placeholder.style.display = 'none';
+            }
+
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+
+    /**
+     * Handle Slip Upload
+     */
+    async handleSlipUpload(event) {
+        event.preventDefault();
+
+        const fileInput = document.getElementById('slip-file');
+        const amount = document.getElementById('slip-amount').value;
+        const transferDate = document.getElementById('slip-date').value;
+
+        if (!fileInput.files || !fileInput.files[0]) {
+            alert('กรุณาเลือกรูปหลักฐานการโอน');
+            return;
+        }
+
+        if (!amount) {
+            alert('กรุณาระบุจำนวนเงิน');
+            return;
+        }
+
+        const submitBtn = event.target.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> กำลังส่งข้อมูล...';
+        submitBtn.disabled = true;
+
+        try {
+            const profile = window.store.get('profile');
+            const file = fileInput.files[0];
+
+            // Read file as base64
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+
+            reader.onload = async () => {
+                const base64 = reader.result.split(',')[1];
+
+                try {
+                    const response = await fetch(`${this.config.BASE_URL}/api/odoo-slip-upload.php`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            line_user_id: profile.userId,
+                            image_base64: base64, // Direct upload
+                            amount: amount,
+                            transfer_date: transferDate
+                        })
+                    });
+
+                    const result = await response.json();
+
+                    if (result.success) {
+                        const slipData = result.data || {};
+                        const isMatched = slipData.matched || slipData.status === 'matched';
+                        let msg = '';
+                        if (isMatched) {
+                            msg = '✅ ส่งหลักฐานและจับคู่เรียบร้อยแล้ว';
+                            if (slipData.order_name) msg += `\n📦 ออเดอร์: ${slipData.order_name}`;
+                            if (slipData.amount) msg += `\n💰 ยอดเงิน: ฿${parseFloat(slipData.amount).toFixed(2)}`;
+                        } else {
+                            msg = '✅ ส่งหลักฐานเรียบร้อยแล้ว\n⏳ รอเจ้าหน้าที่ตรวจสอบและจับคู่การชำระเงิน';
+                        }
+                        alert(msg);
+                        window.router.back();
+                    } else {
+                        throw new Error(result.error || 'Upload failed');
+                    }
+                } catch (error) {
+                    console.error('Upload error:', error);
+                    alert('เกิดข้อผิดพลาด: ' + error.message);
+                    submitBtn.innerHTML = originalText;
+                    submitBtn.disabled = false;
+                }
+            };
+        } catch (error) {
+            console.error('Upload error:', error);
+            alert('เกิดข้อผิดพลาด: ' + error.message);
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
+    }
+}
+
+// Create global instance
+window.liffApp = new LiffApp();
+
+// Initialize on DOM ready
+function initApp() {
+    // Double check DOM is ready and app element exists
+    const app = document.getElementById('app');
+    if (!app) {
+        console.warn('App element not ready, waiting...');
+        setTimeout(initApp, 100);
+        return;
+    }
+    window.liffApp.init();
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initApp);
+} else {
+    // DOM already loaded
+    initApp();
+}

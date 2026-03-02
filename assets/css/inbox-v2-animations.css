@@ -1,0 +1,218 @@
+/**
+ * Inbox V2 Animations and Layout Styles
+ * Handles conversation bump animations and layout fixes
+ */
+
+/* Conversation bump animation */
+.conversation-bumping {
+    background-color: #e0f2f1 !important;
+    transition: background-color 0.4s ease;
+}
+
+/* Ensure conversation items are in normal flow (no position absolute) */
+.user-item {
+    position: relative !important;
+    display: block;
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.user-item:hover {
+    background-color: #f9fafb;
+}
+
+.user-item.active {
+    background-color: #e0f2f1;
+    border-left: 4px solid #14b8a6;
+}
+
+/* SLA warning indicator */
+.user-item.sla-warning {
+    border-left: 4px solid #ef4444;
+}
+
+/* Smooth scroll for conversation list */
+#userList {
+    scroll-behavior: smooth;
+}
+
+/* Chat status badge */
+.chat-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px 6px;
+    border-radius: 9999px;
+    font-size: 9px;
+    font-weight: 500;
+}
+
+/* Tag badge */
+.tag-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+/* Customer type badge */
+.customer-type-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.customer-type-badge.type-a {
+    background-color: #fef3c7;
+    color: #f59e0b;
+}
+
+.customer-type-badge.type-b {
+    background-color: #fce7f3;
+    color: #ec4899;
+}
+
+.customer-type-badge.type-c {
+    background-color: #dbeafe;
+    color: #3b82f6;
+}
+
+/* Unread badge */
+.unread-badge {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
+/* Pulse dot for live indicator */
+.pulse-dot {
+    animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+    }
+}
+
+/* Loading spinner */
+.loading-spinner {
+    border: 3px solid #f3f4f6;
+    border-top: 3px solid #14b8a6;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Fade in animation */
+.fade-in {
+    animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+/* Slide in from right animation */
+.slide-in-right {
+    animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Message bubble animations */
+.message-bubble {
+    animation: messageBubbleIn 0.2s ease-out;
+}
+
+@keyframes messageBubbleIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Typing indicator */
+.typing-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.typing-indicator span {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: #9ca3af;
+    animation: typingDot 1.4s infinite;
+}
+
+.typing-indicator span:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.typing-indicator span:nth-child(3) {
+    animation-delay: 0.4s;
+}
+
+@keyframes typingDot {
+    0%, 60%, 100% {
+        transform: translateY(0);
+        opacity: 0.7;
+    }
+    30% {
+        transform: translateY(-10px);
+        opacity: 1;
+    }
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .user-item {
+        padding: 12px;
+    }
+    
+    .user-item img {
+        width: 40px;
+        height: 40px;
+    }
+}

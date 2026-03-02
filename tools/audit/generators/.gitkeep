@@ -1,0 +1,4 @@
+# This directory will contain report generator classes
+# - JsonReportGenerator
+# - HtmlReportGenerator
+# - MarkdownReportGenerator

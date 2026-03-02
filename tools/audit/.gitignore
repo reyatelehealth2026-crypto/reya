@@ -1,0 +1,31 @@
+# Local configuration
+config.local.php
+
+# Generated reports
+reports/*.json
+reports/*.html
+reports/*.md
+reports/*.csv
+
+# Cache files
+cache/*
+!cache/.gitkeep
+
+# Log files
+logs/*.log
+!logs/.gitkeep
+
+# Temporary files
+*.tmp
+*.temp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

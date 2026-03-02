@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Odoo Router Integration Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #2d3748;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+        .subtitle {
+            color: #718096;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+        .status {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        .status.success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .test-card {
+            background: #f7fafc;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s ease;
+        }
+        .test-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+        .test-card h3 {
+            font-size: 16px;
+            color: #2d3748;
+            margin-bottom: 8px;
+        }
+        .test-card .route {
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #667eea;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            word-break: break-all;
+        }
+        .test-card button {
+            width: 100%;
+            padding: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .test-card button:hover {
+            background: #5568d3;
+            transform: scale(1.02);
+        }
+        .test-card button:active {
+            transform: scale(0.98);
+        }
+        .info-box {
+            background: #ebf8ff;
+            border-left: 4px solid #4299e1;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .info-box h4 {
+            color: #2c5282;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .info-box p {
+            color: #2d3748;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            overflow-x: auto;
+            margin-top: 10px;
+        }
+        .feature-list {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            padding: 10px 0;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+        }
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+        .feature-list li::before {
+            content: "✓";
+            color: #48bb78;
+            font-weight: bold;
+            margin-right: 10px;
+            font-size: 18px;
+        }
+        .footer {
+            text-align: center;
+            color: #718096;
+            font-size: 12px;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔗 Odoo Router Integration Test</h1>
+        <p class="subtitle">Task 16.4: เพิ่มใน LIFF router - Verification</p>
+        <span class="status success">✓ COMPLETE</span>
+
+        <div class="info-box">
+            <h4>📋 Test Instructions</h4>
+            <p>
+                Click the buttons below to test navigation to each Odoo page. 
+                The routes are configured in the LIFF router and will work in the actual LIFF app.
+                This test page demonstrates the route structure and navigation flow.
+            </p>
+        </div>
+
+        <div class="section">
+            <div class="section-title">🧪 Route Tests</div>
+            
+            <div class="test-grid">
+                <div class="test-card">
+                    <h3>📝 Account Linking</h3>
+                    <div class="route">/odoo-link</div>
+                    <button onclick="testRoute('/odoo-link')">
+                        Test Navigation
+                    </button>
+                </div>
+
+                <div class="test-card">
+                    <h3>📦 Orders List</h3>
+                    <div class="route">/odoo-orders</div>
+                    <button onclick="testRoute('/odoo-orders')">
+                        Test Navigation
+                    </button>
+                </div>
+
+                <div class="test-card">
+                    <h3>📄 Order Detail</h3>
+                    <div class="route">/odoo-order/123</div>
+                    <button onclick="testRoute('/odoo-order/123')">
+                        Test Navigation
+                    </button>
+                </div>
+
+                <div class="test-card">
+                    <h3>🚚 Order Tracking</h3>
+                    <div class="route">/odoo-order-tracking/123</div>
+                    <button onclick="testRoute('/odoo-order-tracking/123')">
+                        Test Navigation
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">✨ Implemented Features</div>
+            <ul class="feature-list">
+                <li>Router configuration with 4 new routes</li>
+                <li>Page handler registration in liff-app.js</li>
+                <li>Initialization methods for each page</li>
+                <li>Render methods with loading states</li>
+                <li>Dynamic route parameters for order ID</li>
+                <li>Error handling with fallback UI</li>
+                <li>XSS protection for user input</li>
+                <li>Consistent navigation patterns</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <div class="section-title">💻 Code Examples</div>
+            
+            <h4 style="margin-bottom: 10px; color: #2d3748;">JavaScript Navigation:</h4>
+            <div class="code-block">
+// Navigate to orders list<br>
+window.router.navigate('/odoo-orders');<br>
+<br>
+// Navigate to specific order<br>
+window.router.navigate('/odoo-order/123');<br>
+<br>
+// Navigate to tracking<br>
+window.router.navigate('/odoo-order-tracking/123');<br>
+<br>
+// Go back<br>
+window.router.back();
+            </div>
+
+            <h4 style="margin: 20px 0 10px; color: #2d3748;">HTML Links:</h4>
+            <div class="code-block">
+&lt;!-- Link to orders --&gt;<br>
+&lt;a href="#/odoo-orders"&gt;ดูออเดอร์ทั้งหมด&lt;/a&gt;<br>
+<br>
+&lt;!-- Link to specific order --&gt;<br>
+&lt;a href="#/odoo-order/123"&gt;ดูรายละเอียด&lt;/a&gt;<br>
+<br>
+&lt;!-- Button navigation --&gt;<br>
+&lt;button onclick="window.router.navigate('/odoo-orders')"&gt;<br>
+&nbsp;&nbsp;&lt;i class="fas fa-box"&gt;&lt;/i&gt; ออเดอร์ของฉัน<br>
+&lt;/button&gt;
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📊 Integration Summary</div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
+                <div style="background: #f7fafc; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #667eea;">4</div>
+                    <div style="color: #718096; font-size: 13px;">Routes Added</div>
+                </div>
+                <div style="background: #f7fafc; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #48bb78;">4</div>
+                    <div style="color: #718096; font-size: 13px;">Page Handlers</div>
+                </div>
+                <div style="background: #f7fafc; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #ed8936;">4</div>
+                    <div style="color: #718096; font-size: 13px;">Init Methods</div>
+                </div>
+                <div style="background: #f7fafc; padding: 15px; border-radius: 8px;">
+                    <div style="font-size: 24px; font-weight: bold; color: #9f7aea;">4</div>
+                    <div style="color: #718096; font-size: 13px;">Render Methods</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>✅ Task 16.4 Complete | Odoo Integration | 2026-02-03</p>
+            <p style="margin-top: 5px;">Next: Task 16.5 - เพิ่มใน Rich Menu</p>
+        </div>
+    </div>
+
+    <script>
+        function testRoute(route) {
+            alert(`Testing route: ${route}\n\nIn the actual LIFF app, this would navigate to:\nhttps://cny.re-ya.com/liff/#${route}\n\nThe router would:\n1. Match the route pattern\n2. Extract parameters (if any)\n3. Call the render method\n4. Initialize the page content\n5. Display the page without reload`);
+            
+            console.log('Route test:', {
+                route: route,
+                fullUrl: `https://cny.re-ya.com/liff/#${route}`,
+                routerCall: `window.router.navigate('${route}')`,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // Log test page load
+        console.log('Odoo Router Integration Test loaded');
+        console.log('Routes configured:', [
+            '/odoo-link',
+            '/odoo-orders',
+            '/odoo-order/:id',
+            '/odoo-order-tracking/:id'
+        ]);
+    </script>
+</body>
+</html>

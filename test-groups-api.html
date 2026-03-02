@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ใบเสนอราคา - </title>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #6366f1;
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+            --bg-light: #f9fafb;
+        }
+
+        body {
+            font-family: 'Sarabun', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #e5e7eb;
+            color: var(--text-dark);
+        }
+
+        .container {
+            width: 210mm; /* A4 Width */
+            min-height: 297mm; /* A4 Height */
+            padding: 20mm;
+            margin: 20px auto;
+            background: white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+            position: relative;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 20px;
+            margin-bottom: 30px;
+        }
+
+        .logo-section h1 {
+            margin: 0;
+            color: var(--primary-color);
+            font-size: 28px;
+        }
+
+        .quotation-title {
+            text-align: right;
+        }
+
+        .quotation-title h2 {
+            margin: 0;
+            font-size: 24px;
+            color: var(--text-dark);
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            margin-bottom: 40px;
+        }
+
+        .info-box h3 {
+            font-size: 16px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 40px;
+        }
+
+        th {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .text-right { text-align: right; }
+
+        .total-section {
+            float: right;
+            width: 300px;
+            margin-top: 20px;
+        }
+
+        .total-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            font-weight: bold;
+        }
+
+        .subtotal {
+            border-bottom: 1px solid #eee;
+        }
+
+        .grand-total {
+            font-size: 20px;
+            color: var(--primary-color);
+            border-top: 2px solid var(--primary-color);
+        }
+
+        .payment-footer {
+            margin-top: 40px;
+            padding: 20px;
+            background-color: var(--bg-light);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            clear: both;
+        }
+
+        .qr-code {
+            width: 120px;
+            height: 120px;
+            background: white;
+            padding: 10px;
+            border: 1px solid #ddd;
+        }
+
+        .qr-code img { width: 100%; }
+
+        .payment-details p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        @media print {
+            body { background: none; }
+            .container { margin: 0; box-shadow: none; }
+            .no-print { display: none; }
+        }
+
+        .print-btn {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'Sarabun';
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+
+    <button class="print-btn no-print" onclick="window.print()">บันทึกเป็น PDF / สั่งพิมพ์</button>
+
+    <div class="container">
+        <header>
+            <div class="logo-section">
+                <p>Full-Stack Developer & Solutions</p>
+            </div>
+            <div class="quotation-title">
+                <h2>ใบเสนอราคา</h2>
+                <p>เลขที่: #QT2026-049</p>
+                <p>วันที่: 28 กุมภาพันธ์ 2026</p>
+            </div>
+        </header>
+
+        <div class="info-grid">
+            <div class="info-box">
+                <p>Project: Slip Verification System</p>
+            </div>
+            <div class="info-box">
+                <p>รูปแบบ: ยก Source Code ทั้งหมด</p>
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>ลำดับ</th>
+                    <th>รายการ</th>
+                    <th class="text-right">จำนวน</th>
+                    <th class="text-right">ราคาหน่วยละ</th>
+                    <th class="text-right">ราคารวม</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>1</td>
+                    <td>Source Code ระบบตรวจสอบสลิป (Bank API)+ระบบระบุจำนวนเงิน (Amount API)</td>
+                    <td class="text-right">1</td>
+                    <td class="text-right">2,500.00</td>
+                    <td class="text-right">2,500.00</td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td>Source Codeตรวจสอบผ่าน QR Code โดยไม่ใช้รูปภาพ </td>
+                    <td class="text-right">1</td>
+                    <td class="text-right">500.00</td>
+                    <td class="text-right">500.00</td>
+                </tr>
+                <tr>
+                    <td>3</td>
+                    <td>ระบบแถม: เช็คสลิป TrueMoney Wallet</td>
+                    <td class="text-right">1</td>
+                    <td class="text-right">0.00</td>
+                    <td class="text-right">0.00</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="total-section">
+            <div class="total-row subtotal">
+                <span>รวมทั้งหมด:</span>
+                <span>3,000.00 บาท</span>
+            </div>
+
+        <div class="payment-footer">
+            <div class="qr-code">
+                <img src="https://www.uppic.info/uploads/1772270412.png" alt="Payment QR Code">
+            </div>
+            <div class="payment-details">
+                <p><strong>ช่องทางการชำระเงิน</strong></p>
+                <p>ธนาคาร: กรุงเทพ (BBL)</p>
+                <p>เลขที่บัญชี: 956-0-22162-5</p>
+                <p>ชื่อบัญชี: ภาณุวัฒน์ เอี่ยมพัทธ์</p>
+                <p style="color: var(--primary-color); font-size: 12px; margin-top: 10px;">หรือสแกนสแกน QR Code </p>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

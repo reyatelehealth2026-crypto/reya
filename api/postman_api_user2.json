@@ -1,0 +1,297 @@
+{
+	"info": {
+		"_postman_id": "cny-api-user2-2026",
+		"name": "CNY API - User 2 (webapi_user2@cny.co)",
+		"description": "CNY Odoo 11 API Collection for webapi_user2@cny.co\n\nModule: ineco_pps_sale_order_api\nDate: 2026-01-12",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "https://erp.cnyrxapp.com",
+			"type": "string"
+		},
+		{
+			"key": "api_user",
+			"value": "webapi_user2@cny.co",
+			"type": "string"
+		},
+		{
+			"key": "user_token",
+			"value": "@ewNI*4X*/4t9vgMds2Gzs3j=VG%q%ERYM-1A/utT0#CUZ&UR&$pwvuxj!MNUcruJ@RZ/p7$uN*fdqE6xktQdGxGov%?L0@@CekhyzeROSv2/qmj&%G-vlHq$4V8&AHC/XkxI$Tgkbq3p/6faPvf8wjIP#hfZM7GimVkXbvpvsrfZKOCGk?ldTpL9=5qI-eCVs29xIyr0",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Get Product",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"PRODUCT_CODE\": \"0001\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/get_product",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "get_product"]
+				},
+				"description": "Get product by product code"
+			}
+		},
+		{
+			"name": "2. Get SKU",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"PRODUCT_CODE\": \"0001\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/get_sku",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "get_sku"]
+				},
+				"description": "Get SKU information by product code"
+			}
+		},
+		{
+			"name": "3. Get Partner",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"PARTNER_CODE\": \"PC210265\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/get_partner",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "get_partner"]
+				},
+				"description": "Get partner by partner code"
+			}
+		},
+		{
+			"name": "4. Get Partner Details",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"PARTNER_ID\": 1825\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/get_partner_details",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "get_partner_details"]
+				},
+				"description": "Get partner details by partner ID"
+			}
+		},
+		{
+			"name": "5. Create Sale Order",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"order_ref\": \"TEST_API_USER2_001\",\n    \"marketplace\": \"WEBSITE\",\n    \"marketplace_shop_name\": \"CNYPHARMACY.COM\",\n    \"payment_data\": \"COD\",\n    \"customer_order\": {\n        \"partner_id\": 1825,\n        \"partner_code\": \"PC210265\"\n    },\n    \"customer_delivery_address\": {\n        \"partner_shipping_address_id\": 2025,\n        \"partner_shipping_address_code\": \"PC210265-01\"\n    },\n    \"order_line\": [\n        {\n            \"product_id\": 5,\n            \"qty\": 1,\n            \"price_unit\": 100.00,\n            \"discount\": 0,\n            \"price_subtotal\": 100.00\n        }\n    ],\n    \"order_bottom_amount\": [\n        {\n            \"sum_price_subtotal\": 100.00,\n            \"discount_amount\": 0,\n            \"amount_after_discount\": 100.00,\n            \"amount_untax\": 93.46,\n            \"taxed\": 6.54,\n            \"total_amount\": 100.00\n        }\n    ]\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/create_sale_order",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "create_sale_order"]
+				},
+				"description": "Create a new sale order"
+			}
+		},
+		{
+			"name": "6. Get Sale Order",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"ORDER_REF\": \"TEST_API_USER2_001\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/get_sale_order",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "get_sale_order"]
+				},
+				"description": "Get sale order by order reference"
+			}
+		},
+		{
+			"name": "7. Get Sale Invoice",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"INVOICE_NUMBER\": \"INV-2026-0001\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/get_sale_invoice",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "get_sale_invoice"]
+				},
+				"description": "Get sale invoice by invoice number"
+			}
+		},
+		{
+			"name": "8. Update Delivery Fee",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"order_id\": 12345,\n    \"delivery_fee\": 50.00\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/update_delivery_fee",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "update_delivery_fee"]
+				},
+				"description": "Update delivery fee for an order"
+			}
+		},
+		{
+			"name": "9. Calculate Delivery Fee",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Api-User",
+						"value": "{{api_user}}"
+					},
+					{
+						"key": "User-Token",
+						"value": "{{user_token}}"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"province\": \"Bangkok\",\n    \"weight\": 1.5\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/ineco_gc/calculate_delivery_fee",
+					"host": ["{{base_url}}"],
+					"path": ["ineco_gc", "calculate_delivery_fee"]
+				},
+				"description": "Calculate delivery fee based on province and weight"
+			}
+		}
+	]
+}

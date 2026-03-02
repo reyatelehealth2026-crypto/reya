@@ -1,0 +1,1626 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>คู่มือผู้ดูแลระบบ - LINE Telepharmacy CRM</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.8;
+            color: #2d3748;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.25);
+        }
+        
+        .cover {
+            background: linear-gradient(135deg, #1a365d 0%, #2d5a87 50%, #3182ce 100%);
+            color: white;
+            padding: 80px 60px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .cover::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+        }
+        
+        .cover h1 {
+            font-size: 2.8em;
+            margin-bottom: 20px;
+            font-weight: 700;
+            position: relative;
+            z-index: 1;
+        }
+        
+        .cover .subtitle {
+            font-size: 1.4em;
+            opacity: 0.9;
+            margin-bottom: 30px;
+            font-weight: 300;
+        }
+        
+        .cover .meta {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+        
+        .cover .meta-item {
+            background: rgba(255,255,255,0.15);
+            padding: 15px 25px;
+            border-radius: 12px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .cover .meta-label {
+            font-size: 0.85em;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        .cover .meta-value {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-top: 5px;
+        }
+        
+        .content {
+            padding: 50px 60px;
+        }
+        
+        .toc {
+            background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%);
+            padding: 40px;
+            border-radius: 16px;
+            margin-bottom: 50px;
+            border-left: 5px solid #3182ce;
+        }
+        
+        .toc h2 {
+            color: #1a365d;
+            font-size: 1.6em;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .toc ul {
+            list-style: none;
+            columns: 2;
+            column-gap: 40px;
+        }
+        
+        .toc li {
+            margin-bottom: 12px;
+            break-inside: avoid;
+        }
+        
+        .toc a {
+            color: #2d5a87;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+        
+        .toc a:hover {
+            background: white;
+            color: #1a365d;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        h2 {
+            color: #1a365d;
+            font-size: 2em;
+            margin: 50px 0 25px 0;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        h3 {
+            color: #2d5a87;
+            font-size: 1.4em;
+            margin: 35px 0 18px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        h4 {
+            color: #4a5568;
+            font-size: 1.15em;
+            margin: 25px 0 12px 0;
+        }
+        
+        p {
+            margin-bottom: 18px;
+            text-align: justify;
+        }
+        
+        .highlight-box {
+            background: linear-gradient(135deg, #ebf8ff 0%, #bee3f8 100%);
+            border-left: 5px solid #3182ce;
+            padding: 25px 30px;
+            margin: 25px 0;
+            border-radius: 0 12px 12px 0;
+        }
+        
+        .highlight-box.warning {
+            background: linear-gradient(135deg, #fffaf0 0%, #feebc8 100%);
+            border-left-color: #dd6b20;
+        }
+        
+        .highlight-box.success {
+            background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+            border-left-color: #38a169;
+        }
+        
+        .highlight-box.danger {
+            background: linear-gradient(135deg, #fff5f5 0%, #fed7d7 100%);
+            border-left-color: #e53e3e;
+        }
+        
+        .workflow {
+            background: #f7fafc;
+            padding: 30px;
+            border-radius: 12px;
+            margin: 25px 0;
+            border: 2px solid #e2e8f0;
+        }
+        
+        .workflow-title {
+            font-weight: 600;
+            color: #1a365d;
+            margin-bottom: 20px;
+            font-size: 1.1em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .workflow-steps {
+            counter-reset: step;
+        }
+        
+        .workflow-step {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px dashed #cbd5e0;
+        }
+        
+        .workflow-step:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+        
+        .step-number {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #3182ce 0%, #2c5282 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        
+        .step-content {
+            flex: 1;
+        }
+        
+        .step-title {
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 8px;
+        }
+        
+        .step-desc {
+            color: #4a5568;
+            font-size: 0.95em;
+        }
+        
+        .tip-box {
+            background: linear-gradient(135deg, #faf5ff 0%, #e9d8fd 100%);
+            border-radius: 12px;
+            padding: 25px;
+            margin: 25px 0;
+            position: relative;
+        }
+        
+        .tip-box::before {
+            content: '💡 ทริคพิเศษ';
+            position: absolute;
+            top: -12px;
+            left: 20px;
+            background: #805ad5;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        
+        thead {
+            background: linear-gradient(135deg, #2d5a87 0%, #1a365d 100%);
+            color: white;
+        }
+        
+        th, td {
+            padding: 15px 20px;
+            text-align: left;
+        }
+        
+        th {
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: 0.85em;
+            letter-spacing: 0.5px;
+        }
+        
+        tbody tr {
+            border-bottom: 1px solid #e2e8f0;
+            transition: background 0.2s;
+        }
+        
+        tbody tr:hover {
+            background: #f7fafc;
+        }
+        
+        tbody tr:last-child {
+            border-bottom: none;
+        }
+        
+        .code-block {
+            background: #1a202c;
+            color: #e2e8f0;
+            padding: 20px 25px;
+            border-radius: 12px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        
+        .code-comment {
+            color: #68d391;
+        }
+        
+        .checklist {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .checklist li {
+            padding: 12px 0 12px 40px;
+            position: relative;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .checklist li::before {
+            content: '☐';
+            position: absolute;
+            left: 0;
+            font-size: 1.3em;
+            color: #3182ce;
+        }
+        
+        .page-break {
+            page-break-after: always;
+        }
+        
+        .section-intro {
+            background: linear-gradient(135deg, #f0fff4 0%, #c6f6d5 100%);
+            padding: 30px;
+            border-radius: 16px;
+            margin-bottom: 30px;
+            border: 2px solid #9ae6b4;
+        }
+        
+        .section-intro h4 {
+            color: #22543d;
+            margin-top: 0;
+        }
+        
+        @media print {
+            body {
+                background: white;
+            }
+            .container {
+                box-shadow: none;
+            }
+            .page-break {
+                page-break-after: always;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Cover Page -->
+        <div class="cover">
+            <h1>📚 คู่มือผู้ดูแลระบบ</h1>
+            <p class="subtitle">LINE Telepharmacy CRM Platform</p>
+            <p style="opacity: 0.8; margin-top: 20px;">ระบบจัดการร้านขายยาครบวงจร พร้อมเชื่อมต่อ LINE OA และ Odoo ERP</p>
+            
+            <div class="meta">
+                <div class="meta-item">
+                    <div class="meta-label">เวอร์ชั่น</div>
+                    <div class="meta-value">3.2</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">อัพเดตล่าสุด</div>
+                    <div class="meta-value">กุมภาพันธ์ 2026</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">สำหรับ</div>
+                    <div class="meta-value">Admin & Staff</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <!-- Target Audience -->
+            <div class="highlight-box">
+                <h4>🎯 เอกสารนี้เหมาะกับใคร?</h4>
+                <ul style="margin-top: 15px; margin-left: 20px;">
+                    <li><strong>แอดมินระบบ</strong> ที่ต้องจัดการร้านขายยาผ่านระบบ</li>
+                    <li><strong>เจ้าของร้าน</strong> ที่อยากเข้าใจว่าระบบทำอะไรได้บ้าง</li>
+                    <li><strong>พนักงานใหม่</strong> ที่เพิ่งเริ่มใช้งานระบบ</li>
+                    <li><strong>ฝ่ายบัญชี</strong> ที่ต้องตรวจสอบข้อมูลจาก Odoo</li>
+                </ul>
+            </div>
+            
+            <!-- Table of Contents -->
+            <div class="toc">
+                <h2>📑 สารบัญ</h2>
+                <ul>
+                    <li><a href="#s1"><span>1.</span> ภาพรวมระบบ</a></li>
+                    <li><a href="#s2"><span>2.</span> เข้าสู่ระบบ</a></li>
+                    <li><a href="#s3"><span>3.</span> หน้า Dashboard</a></li>
+                    <li><a href="#s4"><span>4.</span> จัดการผู้ใช้ (Users)</a></li>
+                    <li><a href="#s5"><span>5.</span> แชทกับลูกค้า (Inbox)</a></li>
+                    <li><a href="#s6"><span>6.</span> จัดการ LINE Accounts</a></li>
+                    <li><a href="#s7"><span>7.</span> ข้อมูลจาก Odoo ERP</a></li>
+                    <li><a href="#s8"><span>8.</span> การตั้งค่าระบบ</a></li>
+                    <li><a href="#s9"><span>9.</span> Workflow ประจำวัน</a></li>
+                    <li><a href="#s10"><span>10.</span> การแก้ไขปัญหา</a></li>
+                    <li><a href="#s11"><span>11.</span> Quick Reference</a></li>
+                </ul>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 1: Overview -->
+            <h2 id="s1"><span>🏥</span> 1. ภาพรวมระบบ</h2>
+            
+            <div class="section-intro">
+                <h4>ระบบนี้คืออะไร?</h4>
+                <p><strong>LINE Telepharmacy CRM Platform</strong> คือระบบจัดการร้านขายยาที่เชื่อมต่อกับ LINE Official Account และระบบบัญชี Odoo ERP ช่วยให้คุณจัดการลูกค้า ออเดอร์ และการสื่อสารได้ในที่เดียว</p>
+            </div>
+            
+            <h3>🔌 การเชื่อมต่อหลัก</h3>
+            <div class="code-block">
+┌─────────────────────────────────────────────────────────────┐
+│                    ระบบของคุณ (re-ya)                        │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│  │   Dashboard  │  │    Inbox     │  │    Users     │      │
+│  └──────────────┘  └──────────────┘  └──────────────┘      │
+└──────────┬──────────────────────────────────────────────────┘
+           │
+    ┌──────┴──────┐
+    │             │
+┌───▼────┐   ┌────▼────┐
+│ LINE   │   │  Odoo   │
+│ OA     │   │  ERP    │
+└────────┘   └─────────┘
+            </div>
+            
+            <h3>✨ ฟีเจอร์หลัก</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ฟีเจอร์</th>
+                        <th>คำอธิบาย</th>
+                        <th>ใช้งานบ่อย</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>💬 <strong>Inbox</strong></td>
+                        <td>แชทกับลูกค้าผ่าน LINE แบบ Real-time</td>
+                        <td>⭐⭐⭐⭐⭐</td>
+                    </tr>
+                    <tr>
+                        <td>👥 <strong>Users</strong></td>
+                        <td>ดูข้อมูลลูกค้า LINE และ Odoo</td>
+                        <td>⭐⭐⭐⭐⭐</td>
+                    </tr>
+                    <tr>
+                        <td>📊 <strong>Dashboard</strong></td>
+                        <td>สรุปยอดขาย ออเดอร์ เครดิต</td>
+                        <td>⭐⭐⭐⭐</td>
+                    </tr>
+                    <tr>
+                        <td>🔔 <strong>Broadcast</strong></td>
+                        <td>ส่งข้อความหลายคนพร้อมกัน</td>
+                        <td>⭐⭐⭐⭐</td>
+                    </tr>
+                    <tr>
+                        <td>🏷️ <strong>Tags</strong></td>
+                        <td>ติดแท็กจัดกลุ่มลูกค้า</td>
+                        <td>⭐⭐⭐</td>
+                    </tr>
+                    <tr>
+                        <td>🤖 <strong>AI Chat</strong></td>
+                        <td>ตอบคำถามอัตโนมัติด้วย AI</td>
+                        <td>⭐⭐⭐</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 2: Login -->
+            <h2 id="s2"><span>🔐</span> 2. เข้าสู่ระบบ</h2>
+            
+            <h3>🌐 URL เข้าใช้งาน</h3>
+            <div class="code-block">
+https://cny.re-ya.com/auth/login.php
+            </div>
+            
+            <div class="workflow">
+                <div class="workflow-title">📝 ขั้นตอนการเข้าสู่ระบบ</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">เปิดเบราว์เซอร์</div>
+                            <div class="step-desc">แนะนำใช้ Chrome, Edge หรือ Safari เวอร์ชั่นล่าสุด</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">พิมพ์ URL</div>
+                            <div class="step-desc">ใส่ https://cny.re-ya.com/auth/login.php ในช่อง Address</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">ใส่ข้อมูล Login</div>
+                            <div class="step-desc">กรอก Username และ Password ที่ได้รับจาก Admin</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">เข้าสู่ระบบ</div>
+                            <div class="step-desc">กดปุ่ม "เข้าสู่ระบบ" แล้วรอระบบพาไปยัง Dashboard</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="highlight-box warning">
+                <h4>⚠️ หากลืมรหัสผ่าน</h4>
+                <p>ติดต่อ <strong>Super Admin</strong> เพื่อขอ Reset รหัสผ่าน อย่าพยายาม Login ผิดหลายครั้ง เพราะอาจถูก Lock ชั่วคราว</p>
+            </div>
+            
+            <div class="tip-box">
+                <p><strong>ทริค:</strong> บันทึก URL เป็น Bookmark ไว้ในเบราว์เซอร์ จะได้เข้าถึงเร็วขึ้น หรือตั้งเป็น Homepage ก็ได้</p>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 3: Dashboard -->
+            <h2 id="s3"><span>📊</span> 3. หน้า Dashboard</h2>
+            
+            <div class="section-intro">
+                <h4>Dashboard คืออะไร?</h4>
+                <p>Dashboard เป็นหน้าสรุปข้อมูลสำคัญทั้งหมดของร้าน ช่วยให้คุณเห็นภาพรวมได้ในหน้าเดียว ไม่ต้องไปคลิกหลายๆ ที่</p>
+            </div>
+            
+            <h3>📑 Dashboard มี 3 แท็บ</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>แท็บ</th>
+                        <th>ดูอะไรได้</th>
+                        <th>เหมาะกับใคร</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Executive</strong></td>
+                        <td>ยอดขายรวม กราฟสถิติ แนวโน้มธุรกิจ</td>
+                        <td>เจ้าของร้าน / ผู้จัดการ</td>
+                    </tr>
+                    <tr>
+                        <td><strong>CRM</strong></td>
+                        <td>ลูกค้า แคมเปญ กิจกรรม การตลาด</td>
+                        <td>ฝ่ายการตลาด / แอดมิน</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Odoo Overview</strong></td>
+                        <td>ออเดอร์จาก Odoo เครดิตลูกค้า ยอดค้างชำระ</td>
+                        <td>ฝ่ายบัญชี / การเงิน</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="workflow">
+                <div class="workflow-title">🖥️ วิธีเปลี่ยนแท็บ Dashboard</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">คลิกที่แท็บต้องการ</div>
+                            <div class="step-desc">ที่ด้านบนของหน้า Dashboard จะมีแท็บ [Executive] [CRM] [Odoo] ให้เลือก</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">รอโหลดข้อมูล</div>
+                            <div class="step-desc">ระบบจะดึงข้อมูลล่าสุดมาแสดง ใช้เวลา 1-3 วินาที</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">ดูรายงาน</div>
+                            <div class="step-desc">ข้อมูลจะแสดงในรูปแบบตาราง กราฟ และตัวเลขสรุป</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <h3>📈 ข้อมูลในแต่ละแท็บ</h3>
+            
+            <h4>Executive Dashboard</h4>
+            <ul style="margin-left: 20px; margin-bottom: 20px;">
+                <li><strong>ยอดขายวันนี้</strong> - รายได้จากออเดอร์ที่สร้างวันนี้</li>
+                <li><strong>ยอดขายเดือนนี้</strong> - สรุปรายได้ประจำเดือน</li>
+                <li><strong>จำนวนออเดอร์</strong> - ออเดอร์ทั้งหมด แยกตามสถานะ</li>
+                <li><strong>ลูกค้าใหม่</strong> - จำนวนลูกค้าที่เพิ่มเพื่อนใหม่วันนี้</li>
+                <li><strong>กราฟแนวโน้ม</strong> - เปรียบเทียบยอดขายรายวัน/รายเดือน</li>
+            </ul>
+            
+            <h4>CRM Dashboard</h4>
+            <ul style="margin-left: 20px; margin-bottom: 20px;">
+                <li><strong>จำนวนลูกค้าทั้งหมด</strong> - ยอด Follower ทั้งหมด</li>
+                <li><strong>ลูกค้าที่ Active</strong> - คนที่พึ่งมีกิจกรรมล่าสุด</li>
+                <li><strong>แคมเปญที่กำลังรัน</strong> - Broadcast ที่ตั้งเวลาไว้</li>
+                <li><strong>ข้อความที่รอตอบ</strong> - แชทที่ยังไม่ได้ตอบกลับ</li>
+            </ul>
+            
+            <h4>Odoo Overview</h4>
+            <ul style="margin-left: 20px; margin-bottom: 20px;">
+                <li><strong>จำนวนลูกค้า Odoo</strong> - ลูกค้าที่มีบัญชีใน ERP</li>
+                <li><strong>ออเดอร์วันนี้</strong> - ออเดอร์จาก Odoo วันนี้</li>
+                <li><strong>ยอดค้างชำระ (Total Due)</strong> - เงินที่ลูกค้ายังไม่จ่าย</li>
+                <li><strong>เครดิตที่ใช้ไป/คงเหลือ</strong> - วงเงินเครดิตลูกค้า</li>
+            </ul>
+            
+            <div class="tip-box">
+                <p><strong>ทริค:</strong> ให้เปิด Executive Dashboard ทิ้งไว้เป็นหน้าแรกตอนเริ่มงาน จะได้เห็นยอดขายวันนี้ทันทีที่ Login</p>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 4: Users -->
+            <h2 id="s4"><span>👥</span> 4. จัดการผู้ใช้ (Users)</h2>
+            
+            <div class="section-intro">
+                <h4>หน้า Users ใช้ทำอะไร?</h4>
+                <p>หน้านี้เป็นฐานข้อมูลลูกค้าทั้งหมด แบ่งเป็น 2 ประเภทหลัก: LINE Users (ลูกค้าที่เพิ่มเพื่อน LINE OA) และ Odoo Customers (ลูกค้าที่มีบัญชีในระบบ ERP)</p>
+            </div>
+            
+            <h3>👤 ประเภทของ Users</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ประเภท</th>
+                        <th>แหล่งที่มา</th>
+                        <th>ข้อมูลที่มี</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>LINE Users</strong></td>
+                        <td>จากการเพิ่มเพื่อน LINE OA</td>
+                        <td>ชLINE, รูปโปรไฟล์, เบอร์โทร (ถ้ามี)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Odoo Customers</strong></td>
+                        <td>จากระบบ Odoo ERP</td>
+                        <td>ชื่อ-นามสกุล, ที่อยู่, เครดิต, ยอดค้าง</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="workflow">
+                <div class="workflow-title">🔍 วิธีค้นหาลูกค้า</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">พิมพ์คำค้นหา</div>
+                            <div class="step-desc">ใส่ในช่อง Search ด้านบน - ค้นหาได้จากชื่อ, เบอร์โทร, หรือ LINE ID</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">เลือก Filter (ถ้าต้องการ)</div>
+                            <div class="step-desc">กรองตามแท็ก เช่น VIP, Member, New, Inactive</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">กดค้นหา</div>
+                            <div class="step-desc">ระบบจะแสดงรายชื่อที่ตรงกับเงื่อนไข</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">คลิกดูรายละเอียด</div>
+                            <div class="step-desc">กดที่ชื่อลูกค้าเพื่อดูข้อมูลเต็ม</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <h3>🏷️ แท็ก (Tags) ที่มีในระบบ</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>แท็ก</th>
+                        <th>ความหมาย</th>
+                        <th>ใช้เมื่อไหร่</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span style="background: #f6e05e; padding: 3px 10px; border-radius: 12px; font-size: 0.85em;">VIP</span></td>
+                        <td>ลูกค้าระดับ VIP</td>
+                        <td>ลูกค้าซื้อบ่อย หรือมียอดสูง</td>
+                    </tr>
+                    <tr>
+                        <td><span style="background: #63b3ed; padding: 3px 10px; border-radius: 12px; font-size: 0.85em; color: white;">Member</span></td>
+                        <td>สมาชิกทั่วไป</td>
+                        <td>ลูกค้าที่ลงทะเบียนแล้ว</td>
+                    </tr>
+                    <tr>
+                        <td><span style="background: #68d391; padding: 3px 10px; border-radius: 12px; font-size: 0.85em; color: white;">New</span></td>
+                        <td>ลูกค้าใหม่</td>
+                        <td>เพิ่งเพิ่มเพื่อนใน 7 วัน</td>
+                    </tr>
+                    <tr>
+                        <td><span style="background: #a0aec0; padding: 3px 10px; border-radius: 12px; font-size: 0.85em; color: white;">Inactive</span></td>
+                        <td>ไม่ได้ใช้งานนาน</td>
+                        <td>ไม่มีกิจกรรม 30+ วัน</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="workflow">
+                <div class="workflow-title">📋 ข้อมูลในรายละเอียดลูกค้า</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">ข้อมูลส่วนตัว</div>
+                            <div class="step-desc">ชื่อจริง, เบอร์โทร, อีเมล, ที่อยู่จัดส่ง</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">ประวัติการสั่งซื้อ</div>
+                            <div class="step-desc">รายการออเดอร์ทั้งหมด สถานะ ยอดเงิน</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">แต้มสะสม (Points)</div>
+                            <div class="step-desc">ยอดคะแนนปัจจุบัน และประวัติการได้/ใช้แต้ม</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">ระดับสมาชิก (Tier)</div>
+                            <div class="step-desc">Bronze, Silver, Gold, Platinum เป็นต้น</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">5</div>
+                        <div class="step-content">
+                            <div class="step-title">ประวัติแชท</div>
+                            <div class="step-desc">ดูการสนทนาล่าสุดกับลูกค้า</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tip-box">
+                <p><strong>ทริค:</strong> ใช้ Filter "Inactive" แล้วส่ง Broadcast โปรโมชั่นพิเศษไปกระตุ้นให้กลับมาซื้ออีก</p>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 5: Inbox -->
+            <h2 id="s5"><span>💬</span> 5. แชทกับลูกค้า (Inbox)</h2>
+            
+            <div class="section-intro">
+                <h4>Inbox มีอะไรใหม่?</h4>
+                <p>ระบบ Inbox ได้อัพเกรดเป็น <strong>Next.js Inbox</strong> ที่เร็วขึ้น สวยงามขึ้น แต่ถ้าเจอปัญหาสามารถใช้ Legacy Mode ได้</p>
+            </div>
+            
+            <div class="highlight-box">
+                <h4>🔄 ความแตกต่างระหว่างโหมด</h4>
+                <p><strong>โหมดปกติ (Next.js):</strong> ใช้งานผ่าน https://inbox.re-ya.com เร็ว ลื่น มีฟีเจอร์ครบ</p>
+                <p><strong>Legacy Mode:</strong> ใช้งานผ่าน PHP เดิม สำรองไว้กรณี Next.js มีปัญหา</p>
+            </div>
+            
+            <div class="workflow">
+                <div class="workflow-title">🖥️ วิธีเข้าใช้งาน Inbox</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">คลิกเมนู "Inbox"</div>
+                            <div class="step-desc">ใน Sidebar ทางซ้ายมือ</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">รอ Redirect</div>
+                            <div class="step-desc">ระบบจะพาไปยัง https://inbox.re-ya.com อัตโนมัติผ่าน SSO</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">เริ่มใช้งาน</div>
+                            <div class="step-desc">ไม่ต้อง Login ซ้ำ ระบบจะจดจำการ Login จากหน้าหลัก</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <h3>💡 ฟีเจอร์หลักใน Inbox</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ฟีเจอร์</th>
+                        <th>ใช้ทำอะไร</th>
+                        <th>ทางลัด</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>รายการแชท</strong></td>
+                        <td>ดูรายชื่อลูกค้าที่คุยด้วย เรียงตามล่าสุด</td>
+                        <td>-</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ตอบข้อความ</strong></td>
+                        <td>พิมพ์ตอบกลับลูกค้าแบบ Real-time</td>
+                        <td>Enter</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Assign</strong></td>
+                        <td>มอบหมายงานให้เพื่อนร่วมงาน</td>
+                        <td>Ctrl+A</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ติดแท็ก</strong></td>
+                        <td>ติด Tag ให้ลูกค้ารายนี้</td>
+                        <td>Ctrl+T</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ดูโปรไฟล์</strong></td>
+                        <td>ดูข้อมูลลูกค้าข้างๆ หน้าจอ</td>
+                        <td>Ctrl+P</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Quick Reply</strong></td>
+                        <td>ใช้ข้อความที่ตั้งไว้ล่วงหน้า</td>
+                        <td>/ + ชื่อ template</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="highlight-box warning">
+                <h4>⚠️ ถ้าเข้า Inbox ไม่ได้ (หน้าขาว/Error)</h4>
+                <ol style="margin-left: 20px; margin-top: 10px;">
+                    <li>ลอง <strong>รีเฟรชหน้า</strong> (F5)</li>
+                    <li>ถ้ายังไม่ได้ ให้เพิ่ม <code>?legacy=1</code> ที่ท้าย URL</li>
+                    <li>URL ที่ใช้: <code>https://cny.re-ya.com/inbox-v2.php?legacy=1</code></li>
+                </ol>
+            </div>
+            
+            <div class="tip-box">
+                <p><strong>ทริคการตอบลูกค้าเร็ว:</strong> สร้าง Quick Reply Templates ไว้ล่วงหน้า เช่น "สวัสดีค่ะ ยินดีให้บริการค่ะ", "ขอบคุณที่ใช้บริการค่ะ" แล้วใช้ / ตามด้วยชื่อ template</p>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 6: LINE Accounts -->
+            <h2 id="s6"><span>💚</span> 6. จัดการ LINE Accounts</h2>
+            
+            <div class="section-intro">
+                <h4>ทำไมต้องตั้งค่า LINE Accounts?</h4>
+                <p>ระบบนี้รองรับหลาย LINE Official Account พร้อมกัน ต้องเพิ่มข้อมูลแต่ละบัญชีก่อนถึงจะรับส่งข้อความได้</p>
+            </div>
+            
+            <h3>📝 ข้อมูลที่ต้องมีจาก LINE Developer</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ข้อมูล</th>
+                        <th>หาได้จากไหน</th>
+                        <th>ความสำคัญ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Channel ID</strong></td>
+                        <td>Basic settings tab</td>
+                        <td>ระบุตัวตนของบัญชี</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Channel Secret</strong></td>
+                        <td>Basic settings tab</td>
+                        <td>🔐 ความลับสูง ใช้ Verify webhook</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Channel Access Token</strong></td>
+                        <td>Messaging API tab</td>
+                        <td>🔐 ใช้ส่งข้อความ</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="workflow">
+                <div class="workflow-title">🖥️ วิธีเพิ่ม LINE Account</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">ไปที่ Settings</div>
+                            <div class="step-desc">คลิก "Settings" ใน Sidebar → เลือกแท็บ "LINE Accounts"</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">กด "+ เพิ่มบัญชีใหม่"</div>
+                            <div class="step-desc">ปุ่มสีเขียวมุมขวาบน</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">กรอกข้อมูล</div>
+                            <div class="step-desc">ชื่อบัญชี (ตั้งเองได้), Channel ID, Secret, Token</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">กด "บันทึก"</div>
+                            <div class="step-desc">ระบบจะบันทึกข้อมูลลง Database</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">5</div>
+                        <div class="step-content">
+                            <div class="step-title">ทดสอบการเชื่อมต่อ</div>
+                            <div class="step-desc">กดปุ่ม "ทดสอบ" เพื่อยืนยันว่าใช้งานได้จริง</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="highlight-box danger">
+                <h4>🔐 ข้อควรระวังด้านความปลอดภัย</h4>
+                <ul style="margin-top: 10px; margin-left: 20px;">
+                    <li><strong>Channel Secret</strong> และ <strong>Access Token</strong> เป็นความลับ <span style="color: #e53e3e; font-weight: bold;">ห้ามเผยแพร่เด็ดขาด</span></li>
+                    <li>ถ้า Token หมดอายุ ต้องไปสร้างใหม่ที่ LINE Developer Console</li>
+                    <li>Webhook URL ต้องเป็น <strong>HTTPS</strong> เท่านั้น (ไม่รองรับ HTTP)</li>
+                    <li>อย่าแชร์ข้อมูล Login กับคนอื่น</li>
+                </ul>
+            </div>
+            
+            <h3>🔗 การตั้งค่า Webhook ใน LINE Developer</h3>
+            <div class="code-block">
+<span class="code-comment"># URL ที่ต้องใส่ใน LINE Developer Console:</span>
+https://cny.re-ya.com/webhook.php?account=1
+
+<span class="code-comment"># account=1 คือ ID ของบัญชีแรก ถ้ามีหลายบัญชีจะเป็น 2, 3, ...</span>
+            </div>
+            
+            <div class="workflow">
+                <div class="workflow-title">การเปิดใช้งาน Webhook</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">เข้า LINE Developer Console</div>
+                            <div class="step-desc">https://developers.line.biz/console/</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">เลือก Provider และ Channel</div>
+                            <div class="step-desc">เข้าไปที่ Messaging API Channel ของคุณ</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">ตั้งค่า Webhook URL</div>
+                            <div class="step-desc">ใส่ URL ด้านบนในช่อง Webhook URL</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">เปิดใช้งาน</div>
+                            <div class="step-desc">กด "Verify" แล้วเปิดสวิตช์ "Use webhook"</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">5</div>
+                        <div class="step-content">
+                            <div class="step-title">ปิด Auto-reply</div>
+                            <div class="step-desc">ใน Messaging settings ให้ปิด Auto-reply เพื่อให้ Webhook ทำงาน</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 7: Odoo -->
+            <h2 id="s7"><span>📦</span> 7. ข้อมูลจาก Odoo ERP</h2>
+            
+            <div class="section-intro">
+                <h4>Odoo คืออะไร?</h4>
+                <p><strong>Odoo</strong> คือระบบ ERP (Enterprise Resource Planning) ที่ใช้จัดการบัญชี สต็อกสินค้า ออเดอร์ และลูกค้า ระบบ re-ya เชื่อมต่อกับ Odoo เพื่อดึงข้อมูลมาแสดงในหน้าเดียว</p>
+            </div>
+            
+            <h3>🔌 การเชื่อมต่อ 2 ทาง</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ทิศทาง</th>
+                        <th>วิธีการ</th>
+                        <th>ข้อมูลที่ส่ง</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Odoo → re-ya</strong></td>
+                        <td>Webhook (Real-time)</td>
+                        <td>ออเดอร์ใหม่, การชำระเงิน, อัพเดตสถานะ</td>
+                    </tr>
+                    <tr>
+                        <td><strong>re-ya → Odoo</strong></td>
+                        <td>API Request</td>
+                        <td>ดึงข้อมูลลูกค้า, เช็คเครดิต, ออเดอร์</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <h3>📊 ข้อมูลที่ดึงจาก Odoo</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ข้อมูล</th>
+                        <th>ดูได้ที่ไหน</th>
+                        <th>อัพเดตเมื่อไหร่</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>รายการออเดอร์</td>
+                        <td>Odoo Dashboard</td>
+                        <td>Real-time ผ่าน Webhook</td>
+                    </tr>
+                    <tr>
+                        <td>สถานะการชำระเงิน</td>
+                        <td>Users → รายละเอียดลูกค้า</td>
+                        <td>Real-time</td>
+                    </tr>
+                    <tr>
+                        <td>เครดิตลูกค้า</td>
+                        <td>Odoo Dashboard</td>
+                        <td>ทุก 30 นาที</td>
+                    </tr>
+                    <tr>
+                        <td>ยอดค้างชำระ</td>
+                        <td>Odoo Dashboard</td>
+                        <td>Real-time</td>
+                    </tr>
+                    <tr>
+                        <td>ที่อยู่ลูกค้า</td>
+                        <td>User Detail</td>
+                        <td>เมื่อมีการอัพเดต</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="workflow">
+                <div class="workflow-title">🔔 Webhook Events จาก Odoo</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">สร้างออเดอร์ใหม่</div>
+                            <div class="step-desc">เมื่อมีการสร้าง Sales Order ใน Odoo ระบบจะแจ้งมาทันที</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">อัพเดตสถานะการชำระเงิน</div>
+                            <div class="step-desc">เมื่อลูกค้าชำระเงิน หรือมีการยืนยันสลิป</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">เปลี่ยนแปลงข้อมูลลูกค้า</div>
+                            <div class="step-desc">เมื่อมีการแก้ไขข้อมูลใน Odoo</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">อัพเดตเครดิต</div>
+                            <div class="step-desc">เมื่อวงเงินเครดิตมีการเปลี่ยนแปลง</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="tip-box">
+                <p><strong>ทริค:</strong> ถ้าลูกค้าถามเรื่องยอดค้างชำระ ให้ไปดูที่ User Detail → แท็บ Odoo จะเห็นข้อมูลล่าสุดจากระบบบัญชีทันที ไม่ต้องโทรไปถามแผนกบัญชี</p>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 8: Settings -->
+            <h2 id="s8"><span>⚙️</span> 8. การตั้งค่าระบบ</h2>
+            
+            <div class="section-intro">
+                <h4>Settings มีอะไรบ้าง?</h4>
+                <p>หน้าตั้งค่าระบบรวมการจัดการทั้งหมดไว้ในที่เดียว แบ่งเป็นแท็บต่างๆ ตามหมวดหมู่</p>
+            </div>
+            
+            <h3>📑 แท็บต่างๆ ใน Settings</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>แท็บ</th>
+                        <th>ใช้ทำอะไร</th>
+                        <th>ใช้บ่อยไหม</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>LINE Accounts</strong></td>
+                        <td>เพิ่ม/แก้ไขบัญชี LINE OA</td>
+                        <td>⭐⭐⭐ ตอนตั้งค่าครั้งแรก</td>
+                    </tr>
+                    <tr>
+                        <td><strong>ข้อความต้อนรับ</strong></td>
+                        <td>ตั้งค่าข้อความตอบอัตโนมัติตอนเพิ่มเพื่อน</td>
+                        <td>⭐⭐⭐⭐ ควรอัพเดตบ่อย</td>
+                    </tr>
+                    <tr>
+                        <td><strong>LIFF Settings</strong></td>
+                        <td>ตั้งค่า LINE Frontend Framework</td>
+                        <td>⭐⭐ ให้ Dev จัดการ</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Vibe Selling v2</strong></td>
+                        <td>ตั้งค่า AI Chat</td>
+                        <td>⭐⭐⭐ ปรับแต่ง AI</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Telegram</strong></td>
+                        <td>เชื่อมต่อ Telegram Bot</td>
+                        <td>⭐⭐ ถ้าใช้ Telegram</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Email/SMTP</strong></td>
+                        <td>ตั้งค่าส่งอีเมล</td>
+                        <td>⭐⭐⭐ ตอนตั้งค่า</td>
+                    </tr>
+                    <tr>
+                        <td><strong>การแจ้งเตือน</strong></td>
+                        <td>ตั้งค่าการแจ้งเตือนต่างๆ</td>
+                        <td>⭐⭐⭐⭐ ควรตั้งค่า</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Consent</strong></td>
+                        <td>ตั้งค่า PDPA ความยินยอมใช้ข้อมูล</td>
+                        <td>⭐⭐⭐ ตามกฎหมาย</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="workflow">
+                <div class="workflow-title">🛠️ ตั้งค่าข้อความต้อนรับ (Welcome Message)</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">ไปที่ Settings</div>
+                            <div class="step-desc">คลิก "ข้อความต้อนรับ" ใน Sidebar</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">เลือกบัญชี LINE</div>
+                            <div class="step-desc">ถ้ามีหลายบัญชี ให้เลือกบัญชีที่ต้องการแก้ไข</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">แก้ไขข้อความ</div>
+                            <div class="step-desc">พิมพ์ข้อความที่ต้องการให้ส่งอัตโนมัติ</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">กด "บันทึก"</div>
+                            <div class="step-desc">ระบบจะบันทึกและใช้งานทันที</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="highlight-box success">
+                <h4>✅ ตัวอย่างข้อความต้อนรับที่ดี</h4>
+                <div style="background: white; padding: 15px; border-radius: 8px; margin-top: 10px; font-style: italic;">
+                    "สวัสดีค่ะ 🙏 ยินดีต้อนรับสู่ร้านขายยา CNY<br><br>
+                    🏥 บริการของเรา:<br>
+                    • สอบถามยาและอาหารเสริม<br>
+                    • ปรึกษาเภสัชกร<br>
+                    • สั่งซื้อสินค้า<br><br>
+                  กรุณาพิมพ์ 'เมนู' เพื่อดูตัวเลือก หรือพิมพ์คำถามได้เลยค่ะ"
+                </div>
+            </div>
+            
+            <div class="tip-box">
+                <p><strong>ทริค:</strong> ใส่ Emoji และจัดรูปแบบให้อ่านง่าย ลูกค้าจะรู้สึกเป็นกันเองมากขึ้น ควรอัพเดตข้อความต้อนรับตามโปรโมชั่นปัจจุบัน</p>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 9: Workflow -->
+            <h2 id="s9"><span>🔄</span> 9. Workflow ประจำวัน</h2>
+            
+            <div class="section-intro">
+                <h4>Checklist สำหรับแอดมินแต่ละกะ</h4>
+                <p>ทำตาม Checklist นี้ทุกวัน เพื่อให้ระบบทำงานได้อย่างเต็มประสิทธิภาพ</p>
+            </div>
+            
+            <h3>☀️ Checklist กะเช้า (เปิดร้าน)</h3>
+            <ul class="checklist">
+                <li>Login เข้าระบบ</li>
+                <li>ตรวจสอบ Dashboard ยอดขายวันก่อนหน้า</li>
+                <li>เช็ค Odoo Dashboard มีออเดอร์ค้างส่งไหม</li>
+                <li>เปิด Inbox ดูว่ามีข้อความรอตอบจากคืนก่อนไหม</li>
+                <li>ทดสอบส่งข้อความทดสอบไปที่ LINE OA ตัวเอง</li>
+                <li>เช็คว่า Webhook ทำงานปกติ (มีข้อความเข้าหรือไม่)</li>
+            </ul>
+            
+            <h3>🌤️ Checklist ระหว่างวัน</h3>
+            <ul class="checklist">
+                <li>ตอบแชทลูกค้าภายใน 5 นาที</li>
+                <li>เช็ค Odoo ออเดอร์ใหม่ทุก 30 นาที</li>
+                <li>อัพเดตสถานะออเดอร์ในระบบ</li>
+                <li>ตรวจสอบสลิปการโอนเงิน</li>
+                <li>ติดตามออเดอร์ที่ยังไม่ชำระเงิน</li>
+            </ul>
+            
+            <h3>🌙 Checklist กะดึก (ปิดร้าน)</h3>
+            <ul class="checklist">
+                <li>ตรวจสอบยอดขายรวมวันนี้</li>
+                <li>เช็คออเดอร์ที่ยังไม่เสร็จ ส่งต่อกะถัดไป</li>
+                <li>ตอบแชทลูกค้าที่ยังค้าง</li>
+                <li>สรุปยอดให้ผู้จัดการ</li>
+                <li>Logout ออกจากระบบ</li>
+            </ul>
+            
+            <div class="workflow">
+                <div class="workflow-title">📋 Workflow รับออเดอร์จากลูกค้า</div>
+                <div class="workflow-steps">
+                    <div class="workflow-step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <div class="step-title">ลูกค้าสั่งซื้อผ่าน Inbox</div>
+                            <div class="step-desc">รับข้อความ/สินค้าที่ลูกค้าต้องการ</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <div class="step-title">ตรวจสอบสต็อก</div>
+                            <div class="step-desc">เช็คว่ามีสินค้าหรือไม่ ถ้าไม่มีแจ้งลูกค้า</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">3</div>
+                        <div class="step-content">
+                            <div class="step-title">สร้างออเดอร์ใน Odoo</div>
+                            <div class="step-desc">หรือบันทึกในระบบให้ครบถ้วน</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">4</div>
+                        <div class="step-content">
+                            <div class="step-title">แจ้งยอดและเลขบัญชี</div>
+                            <div class="step-desc">ส่ง Flex Message หรือข้อความแจ้งยอด</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">5</div>
+                        <div class="step-content">
+                            <div class="step-title">รอลูกค้าส่งสลิป</div>
+                            <div class="step-desc">เมื่อได้รับสลิป ตรวจสอบและยืนยันการชำระเงิน</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">6</div>
+                        <div class="step-content">
+                            <div class="step-title">จัดส่งสินค้า</div>
+                            <div class="step-desc">แพ็คสินค้า ส่งขนส่ง อัพเดต Tracking</div>
+                        </div>
+                    </div>
+                    <div class="workflow-step">
+                        <div class="step-number">7</div>
+                        <div class="step-content">
+                            <div class="step-title">อัพเดตสถานะ</div>
+                            <div class="step-desc">แจ้งลูกค้าเมื่อส่งสินค้าแล้ว</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 10: Troubleshooting -->
+            <h2 id="s10"><span>🛠️</span> 10. การแก้ไขปัญหา</h2>
+            
+            <h3>❌ ปัญหาที่พบบ่อยและวิธีแก้</h3>
+            
+            <h4>1. เข้า Inbox ไม่ได้ / หน้าขาว</h4>
+            <div class="highlight-box warning">
+                <p><strong>สาเหตุ:</strong> SSO Token หมดอายุ หรือ Next.js Server มีปัญหา</p>
+                <p><strong>แก้ไข:</strong></p>
+                <ol style="margin-left: 20px;">
+                    <li>รีเฟรชหน้าเว็บ (<kbd>F5</kbd>)</li>
+                    <li>ถ้ายังไม่ได้ ใช้ Legacy Mode:
+                        <div class="code-block" style="margin-top: 10px;">
+https://cny.re-ya.com/inbox-v2.php?legacy=1
+                        </div>
+                    </li>
+                    <li>ถ้ายังไม่ได้ ติดต่อ IT Support</li>
+                </ol>
+            </div>
+            
+            <h4>2. ไม่ได้รับข้อความจากลูกค้า</h4>
+            <div class="highlight-box warning">
+                <p><strong>สาเหตุ:</strong> Webhook URL ไม่ถูกต้อง หรือ Channel Secret ผิด</p>
+                <p><strong>แก้ไข:</strong></p>
+                <ol style="margin-left: 20px;">
+                    <li>ไปที่ <strong>Settings → LINE Accounts</strong></li>
+                    <li>กด "ทดสอบการเชื่อมต่อ"</li>
+                    <li>ถ้าไม่ผ่าน → ตรวจสอบ Channel Secret และ Token</li>
+                    <li>ไปที่ <a href="https://developers.line.biz/console/">LINE Developer Console</a></li>
+                    <li>ตรวจสอบ Webhook URL ต้องเป็น:
+                        <div class="code-block" style="margin-top: 10px;">
+https://cny.re-ya.com/webhook.php?account=1
+                        </div>
+                    </li>
+                    <li>ตรวจสอบว่าเปิด "Use webhook" และปิด "Auto-reply"</li>
+                </ol>
+            </div>
+            
+            <h4>3. ข้อมูล Odoo ไม่อัพเดต</h4>
+            <div class="highlight-box warning">
+                <p><strong>สาเหตุ:</strong> Webhook จาก Odoo ไม่มา หรือ API Key หมดอายุ</p>
+                <p><strong>แก้ไข:</strong></p>
+                <ol style="margin-left: 20px;">
+                    <li>ไปที่ <strong>Odoo Dashboard</strong> ดูสถานะ</li>
+                    <li>ตรวจสอบว่า Webhook URL ถูกต้อง:
+                        <div class="code-block" style="margin-top: 10px;">
+https://cny.re-ya.com/api/webhook/odoo.php
+                        </div>
+                    </li>
+                    <li>ตรวจสอบ API Key ใน config (ต้องให้ Dev ช่วย)</li>
+                    <li>ติดต่อทีม Odoo ให้ตรวจสอบการส่ง Webhook</li>
+                </ol>
+            </div>
+            
+            <h4>4. ส่ง Broadcast ไม่ได้</h4>
+            <div class="highlight-box warning">
+                <p><strong>สาเหตุ:</strong> Token หมดอายุ หรือส่งข้อความเยอะเกิน (Rate Limit)</p>
+                <p><strong>แก้ไข:</strong></p>
+                <ol style="margin-left: 20px;">
+                    <li>ไปที่ <strong>Settings → LINE Accounts → ทดสอบการเชื่อมต่อ</strong></li>
+                    <li>ถ้า Token หมดอายุ → ไปสร้างใหม่ที่ LINE Developer Console</li>
+                    <li>ถ้าโดน Rate Limit → รอ 1 ชั่วโมงแล้วลองใหม่</li>
+                    <li>ตรวจสอบ Quota การสBroadcast รายเดือน</li>
+                </ol>
+            </div>
+            
+            <h4>5. หน้าเว็บโหลดช้า</h4>
+            <div class="highlight-box warning">
+                <p><strong>แก้ไข:</strong></p>
+                <ol style="margin-left: 20px;">
+                    <li>กด <kbd>F12</kbd> → ไปที่แท็บ <strong>Network</strong> → ดูว่าอะไรโหลดช้า</li>
+                    <li>ล้าง Cache (<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd>)</li>
+                    <li>ตรวจสอบว่าเป็นกับทุกหน้าหรือหน้าเดียว</li>
+                    <li>ถ้าเป็นหน้า Dashboard → อาจเป็นเพราะดึงข้อมูลเยอะ รอสักครู่</li>
+                    <li>ลองเปิดด้วยเบราว์เซอร์อื่น</li>
+                    <li>เช็คความเร็วอินเทอร์เน็ต</li>
+                </ol>
+            </div>
+            
+            <h3>📞 ติดต่อขอความช่วยเหลือ</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ปัญหา</th>
+                        <th>ติดต่อ</th>
+                        <th>ช่องทาง</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>ระบบ LINE / Inbox</td>
+                        <td>ทีมพัฒนา</td>
+                        <td>LINE: @support / Email: dev@re-ya.com</td>
+                    </tr>
+                    <tr>
+                        <td>ระบบ Odoo / บัญชี</td>
+                        <td>ทีม Odoo</td>
+                        <td>Email: odoo@cny.co</td>
+                    </tr>
+                    <tr>
+                        <td>บัญชี / Login ไม่ได้</td>
+                        <td>Super Admin</td>
+                        <td>LINE: @admin</td>
+                    </tr>
+                    <tr>
+                        <td>แจ้ง Bug / Feature Request</td>
+                        <td>GitHub Issues</td>
+                        <td>github.com/re-ya/crm/issues</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="page-break"></div>
+            
+            <!-- Section 11: Quick Reference -->
+            <h2 id="s11"><span>📋</span> 11. Quick Reference</h2>
+            
+            <h3>🌐 URL สำคัญ</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>หน้า</th>
+                        <th>URL</th>
+                        <th>ใช้เมื่อไหร่</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Login</td>
+                        <td><code>https://cny.re-ya.com/auth/login.php</code></td>
+                        <td>เข้าระบบทุกครั้ง</td>
+                    </tr>
+                    <tr>
+                        <td>Dashboard</td>
+                        <td><code>https://cny.re-ya.com/dashboard.php</code></td>
+                        <td>ดูสรุปยอดขาย</td>
+                    </tr>
+                    <tr>
+                        <td>Users</td>
+                        <td><code>https://cny.re-ya.com/users.php</code></td>
+                        <td>ค้นหาข้อมูลลูกค้า</td>
+                    </tr>
+                    <tr>
+                        <td>Inbox</td>
+                        <td><code>https://cny.re-ya.com/inbox-v2.php</code></td>
+                        <td>แชทกับลูกค้า</td>
+                    </tr>
+                    <tr>
+                        <td>Inbox (Legacy)</td>
+                        <td><code>https://cny.re-ya.com/inbox-v2.php?legacy=1</code></td>
+                        <td>เมื่อ Inbox ปกติมีปัญหา</td>
+                    </tr>
+                    <tr>
+                        <td>Settings</td>
+                        <td><code>https://cny.re-ya.com/settings.php</code></td>
+                        <td>ตั้งค่าระบบ</td>
+                    </tr>
+                    <tr>
+                        <td>Odoo Dashboard</td>
+                        <td><code>https://cny.re-ya.com/odoo-dashboard.php</code></td>
+                        <td>ดูข้อมูลจาก Odoo</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <h3>⌨️ คีย์ลัด (Keyboard Shortcuts)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>คีย์ลัด</th>
+                        <th>ทำอะไร</th>
+                        <th>ใช้ที่ไหน</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><kbd>F5</kbd></td>
+                        <td>รีเฟรชหน้า</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Ctrl</kbd>+<kbd>R</kbd></td>
+                        <td>รีเฟรชหน้า</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>R</kbd></td>
+                        <td>ล้าง Cache แล้วรีเฟรช</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Ctrl</kbd>+<kbd>F</kbd></td>
+                        <td>ค้นหาในหน้า</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Ctrl</kbd>+<kbd>A</kbd></td>
+                        <td>Assign งาน</td>
+                        <td>Inbox</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Ctrl</kbd>+<kbd>T</kbd></td>
+                        <td>ติดแท็ก</td>
+                        <td>Inbox</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Ctrl</kbd>+<kbd>P</kbd></td>
+                        <td>ดูโปรไฟล์ลูกค้า</td>
+                        <td>Inbox</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Enter</kbd></td>
+                        <td>ส่งข้อความ</td>
+                        <td>Inbox</td>
+                    </tr>
+                    <tr>
+                        <td><kbd>Alt</kbd>+<kbd>←</kbd></td>
+                        <td>ย้อนกลับ</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <h3>🎨 สีของแท็ก (Tags)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>แท็ก</th>
+                        <th>สี</th>
+                        <th>ใช้กับ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>VIP</td>
+                        <td><span style="background: #f6e05e; padding: 3px 10px; border-radius: 12px;">🟡 เหลือง</span></td>
+                        <td>ลูกค้าสำคัญ</td>
+                    </tr>
+                    <tr>
+                        <td>Member</td>
+                        <td><span style="background: #63b3ed; padding: 3px 10px; border-radius: 12px; color: white;">🔵 ฟ้า</span></td>
+                        <td>สมาชิกทั่วไป</td>
+                    </tr>
+                    <tr>
+                        <td>New</td>
+                        <td><span style="background: #68d391; padding: 3px 10px; border-radius: 12px; color: white;">🟢 เขียว</span></td>
+                        <td>ลูกค้าใหม่</td>
+                    </tr>
+                    <tr>
+                        <td>Inactive</td>
+                        <td><span style="background: #a0aec0; padding: 3px 10px; border-radius: 12px; color: white;">⚪ เทา</span></td>
+                        <td>ไม่ได้ใช้งานนาน</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="highlight-box success" style="margin-top: 40px;">
+                <h4>✅ สรุป</h4>
+                <p>เอกสารนี้ครอบคลุมการใช้งานระบบ LINE Telepharmacy CRM ตั้งแต่เริ่มต้นจนถึงการแก้ไขปัญหา</p>
+                <p style="margin-top: 10px;"><strong>หากมีคำถามเพิ่มเติม:</strong> ติดต่อทีม Support ผ่านช่องทางที่ระบุไว้ในหัวข้อที่ 10</p>
+            </div>
+            
+            <div style="text-align: center; margin-top: 50px; padding: 30px; background: linear-gradient(135deg, #f7fafc 0%, #edf2f7 100%); border-radius: 12px;">
+                <p style="font-size: 1.2em; color: #2d5a87; font-weight: 600;">© 2026 CNY Telepharmacy</p>
+                <p style="color: #718096; margin-top: 10px;">คู่มือฉบับที่ 1.0 | อัพเดตล่าสุด: กุมภาพันธ์ 2026</p>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

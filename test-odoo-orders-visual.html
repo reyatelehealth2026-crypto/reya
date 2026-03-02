@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Odoo Orders API - Visual Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .test-section {
+            background: white;
+            padding: 25px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            margin-bottom: 20px;
+        }
+
+        .test-section h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #f0f0f0;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #333;
+            font-weight: 600;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+
+        .result-box {
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .result-box pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+        }
+
+        .order-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            transition: all 0.3s;
+        }
+
+        .order-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.2);
+        }
+
+        .order-card h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .order-card p {
+            margin: 5px 0;
+            color: #666;
+        }
+
+        .timeline {
+            position: relative;
+            padding-left: 30px;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: 20px;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -22px;
+            top: 5px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #e0e0e0;
+        }
+
+        .timeline-item.completed::before {
+            background: #28a745;
+        }
+
+        .timeline-item.current::before {
+            background: #667eea;
+            box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.2);
+        }
+
+        .timeline-item::after {
+            content: '';
+            position: absolute;
+            left: -17px;
+            top: 17px;
+            width: 2px;
+            height: calc(100% - 12px);
+            background: #e0e0e0;
+        }
+
+        .timeline-item:last-child::after {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🛒 Odoo Orders API</h1>
+            <p>Visual Testing Interface</p>
+        </div>
+
+        <!-- Configuration Section -->
+        <div class="test-section">
+            <h2>⚙️ Configuration</h2>
+            <div class="form-group">
+                <label>LINE User ID:</label>
+                <input type="text" id="lineUserId" value="U1234567890abcdef" placeholder="Enter LINE User ID">
+            </div>
+        </div>
+
+        <!-- List Orders Section -->
+        <div class="test-section">
+            <h2>📋 List Orders</h2>
+            <div class="grid">
+                <div class="form-group">
+                    <label>State Filter:</label>
+                    <select id="listState">
+                        <option value="">All States</option>
+                        <option value="draft">Draft</option>
+                        <option value="sent">Sent</option>
+                        <option value="sale">Confirmed</option>
+                        <option value="done">Done</option>
+                        <option value="cancel">Cancelled</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Date From:</label>
+                    <input type="date" id="listDateFrom" value="2026-01-01">
+                </div>
+                <div class="form-group">
+                    <label>Date To:</label>
+                    <input type="date" id="listDateTo" value="2026-12-31">
+                </div>
+                <div class="form-group">
+                    <label>Limit:</label>
+                    <input type="number" id="listLimit" value="10" min="1" max="100">
+                </div>
+            </div>
+            <div class="button-group">
+                <button class="btn-primary" onclick="testListOrders()">📋 Get Orders List</button>
+                <button class="btn-secondary" onclick="clearResult('listResult')">Clear</button>
+            </div>
+            <div class="loading" id="listLoading">
+                <div class="spinner"></div>
+                <p>Loading orders...</p>
+            </div>
+            <div id="listResult"></div>
+        </div>
+
+        <!-- Order Detail Section -->
+        <div class="test-section">
+            <h2>📄 Order Detail</h2>
+            <div class="form-group">
+                <label>Order ID:</label>
+                <input type="number" id="detailOrderId" placeholder="Enter Order ID">
+            </div>
+            <div class="button-group">
+                <button class="btn-primary" onclick="testOrderDetail()">📄 Get Order Detail</button>
+                <button class="btn-secondary" onclick="clearResult('detailResult')">Clear</button>
+            </div>
+            <div class="loading" id="detailLoading">
+                <div class="spinner"></div>
+                <p>Loading order detail...</p>
+            </div>
+            <div id="detailResult"></div>
+        </div>
+
+        <!-- Order Tracking Section -->
+        <div class="test-section">
+            <h2>📍 Order Tracking</h2>
+            <div class="form-group">
+                <label>Order ID:</label>
+                <input type="number" id="trackingOrderId" placeholder="Enter Order ID">
+            </div>
+            <div class="button-group">
+                <button class="btn-primary" onclick="testOrderTracking()">📍 Get Tracking</button>
+                <button class="btn-secondary" onclick="clearResult('trackingResult')">Clear</button>
+            </div>
+            <div class="loading" id="trackingLoading">
+                <div class="spinner"></div>
+                <p>Loading tracking info...</p>
+            </div>
+            <div id="trackingResult"></div>
+        </div>
+
+        <!-- Search Orders Section -->
+        <div class="test-section">
+            <h2>🔍 Search Orders</h2>
+            <div class="grid">
+                <div class="form-group">
+                    <label>Search Query:</label>
+                    <input type="text" id="searchQuery" placeholder="e.g., SO001">
+                </div>
+                <div class="form-group">
+                    <label>State Filter:</label>
+                    <select id="searchState">
+                        <option value="">All States</option>
+                        <option value="draft">Draft</option>
+                        <option value="sent">Sent</option>
+                        <option value="sale">Confirmed</option>
+                        <option value="done">Done</option>
+                        <option value="cancel">Cancelled</option>
+                    </select>
+                </div>
+            </div>
+            <div class="button-group">
+                <button class="btn-primary" onclick="testSearchOrders()">🔍 Search Orders</button>
+                <button class="btn-secondary" onclick="clearResult('searchResult')">Clear</button>
+            </div>
+            <div class="loading" id="searchLoading">
+                <div class="spinner"></div>
+                <p>Searching orders...</p>
+            </div>
+            <div id="searchResult"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/re-ya/api/odoo-orders.php';
+
+        async function callAPI(data) {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            });
+            return await response.json();
+        }
+
+        function showLoading(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function hideLoading(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function displayResult(elementId, data, isSuccess) {
+            const element = document.getElementById(elementId);
+            const badge = isSuccess ? 
+                '<span class="status-badge status-success">✓ Success</span>' :
+                '<span class="status-badge status-error">✗ Error</span>';
+            
+            element.innerHTML = badge + '<div class="result-box"><pre>' + 
+                JSON.stringify(data, null, 2) + '</pre></div>';
+        }
+
+        function displayOrdersList(elementId, data) {
+            const element = document.getElementById(elementId);
+            
+            if (!data.success) {
+                displayResult(elementId, data, false);
+                return;
+            }
+
+            const orders = data.data.orders || [];
+            const total = data.data.total || 0;
+
+            let html = '<span class="status-badge status-success">✓ Success</span>';
+            html += '<p><strong>Total Orders:</strong> ' + total + '</p>';
+            html += '<div class="grid" style="margin-top: 20px;">';
+
+            orders.forEach(order => {
+                html += `
+                    <div class="order-card">
+                        <h3>${order.name || 'N/A'}</h3>
+                        <p><strong>Date:</strong> ${order.date_order || 'N/A'}</p>
+                        <p><strong>State:</strong> ${order.state || 'N/A'}</p>
+                        <p><strong>Amount:</strong> ${order.amount_total ? order.amount_total.toLocaleString() : '0'} บาท</p>
+                        <p><strong>Customer:</strong> ${order.customer?.name || 'N/A'}</p>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            html += '<div class="result-box" style="margin-top: 20px;"><pre>' + 
+                JSON.stringify(data, null, 2) + '</pre></div>';
+
+            element.innerHTML = html;
+        }
+
+        function displayTracking(elementId, data) {
+            const element = document.getElementById(elementId);
+            
+            if (!data.success) {
+                displayResult(elementId, data, false);
+                return;
+            }
+
+            const timeline = data.data.timeline || [];
+
+            let html = '<span class="status-badge status-success">✓ Success</span>';
+            html += '<div class="timeline" style="margin-top: 20px;">';
+
+            timeline.forEach(item => {
+                const classes = [];
+                if (item.completed) classes.push('completed');
+                if (item.current) classes.push('current');
+
+                html += `
+                    <div class="timeline-item ${classes.join(' ')}">
+                        <strong>${item.label || item.state}</strong>
+                        ${item.timestamp ? '<p>' + item.timestamp + '</p>' : ''}
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            html += '<div class="result-box" style="margin-top: 20px;"><pre>' + 
+                JSON.stringify(data, null, 2) + '</pre></div>';
+
+            element.innerHTML = html;
+        }
+
+        function clearResult(elementId) {
+            document.getElementById(elementId).innerHTML = '';
+        }
+
+        async function testListOrders() {
+            const lineUserId = document.getElementById('lineUserId').value;
+            const state = document.getElementById('listState').value;
+            const dateFrom = document.getElementById('listDateFrom').value;
+            const dateTo = document.getElementById('listDateTo').value;
+            const limit = document.getElementById('listLimit').value;
+
+            if (!lineUserId) {
+                alert('Please enter LINE User ID');
+                return;
+            }
+
+            showLoading('listLoading');
+
+            const requestData = {
+                action: 'list',
+                line_user_id: lineUserId,
+                limit: parseInt(limit)
+            };
+
+            if (state) requestData.state = state;
+            if (dateFrom) requestData.date_from = dateFrom;
+            if (dateTo) requestData.date_to = dateTo;
+
+            try {
+                const result = await callAPI(requestData);
+                displayOrdersList('listResult', result);
+            } catch (error) {
+                displayResult('listResult', { error: error.message }, false);
+            } finally {
+                hideLoading('listLoading');
+            }
+        }
+
+        async function testOrderDetail() {
+            const lineUserId = document.getElementById('lineUserId').value;
+            const orderId = document.getElementById('detailOrderId').value;
+
+            if (!lineUserId) {
+                alert('Please enter LINE User ID');
+                return;
+            }
+
+            if (!orderId) {
+                alert('Please enter Order ID');
+                return;
+            }
+
+            showLoading('detailLoading');
+
+            try {
+                const result = await callAPI({
+                    action: 'detail',
+                    line_user_id: lineUserId,
+                    order_id: parseInt(orderId)
+                });
+                displayResult('detailResult', result, result.success);
+            } catch (error) {
+                displayResult('detailResult', { error: error.message }, false);
+            } finally {
+                hideLoading('detailLoading');
+            }
+        }
+
+        async function testOrderTracking() {
+            const lineUserId = document.getElementById('lineUserId').value;
+            const orderId = document.getElementById('trackingOrderId').value;
+
+            if (!lineUserId) {
+                alert('Please enter LINE User ID');
+                return;
+            }
+
+            if (!orderId) {
+                alert('Please enter Order ID');
+                return;
+            }
+
+            showLoading('trackingLoading');
+
+            try {
+                const result = await callAPI({
+                    action: 'tracking',
+                    line_user_id: lineUserId,
+                    order_id: parseInt(orderId)
+                });
+                displayTracking('trackingResult', result);
+            } catch (error) {
+                displayResult('trackingResult', { error: error.message }, false);
+            } finally {
+                hideLoading('trackingLoading');
+            }
+        }
+
+        async function testSearchOrders() {
+            const lineUserId = document.getElementById('lineUserId').value;
+            const query = document.getElementById('searchQuery').value;
+            const state = document.getElementById('searchState').value;
+
+            if (!lineUserId) {
+                alert('Please enter LINE User ID');
+                return;
+            }
+
+            if (!query) {
+                alert('Please enter search query');
+                return;
+            }
+
+            showLoading('searchLoading');
+
+            const requestData = {
+                action: 'search',
+                line_user_id: lineUserId,
+                query: query
+            };
+
+            if (state) requestData.state = state;
+
+            try {
+                const result = await callAPI(requestData);
+                displayOrdersList('searchResult', result);
+            } catch (error) {
+                displayResult('searchResult', { error: error.message }, false);
+            } finally {
+                hideLoading('searchLoading');
+            }
+        }
+    </script>
+</body>
+</html>

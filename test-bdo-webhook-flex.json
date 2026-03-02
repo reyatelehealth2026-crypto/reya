@@ -1,0 +1,144 @@
+{
+    "type": "bubble",
+    "header": {
+        "type": "box",
+        "layout": "vertical",
+        "contents": [
+            {
+                "type": "text",
+                "text": "💰 แจ้งชำระเงิน",
+                "weight": "bold",
+                "size": "xl",
+                "color": "#ffffff"
+            }
+        ],
+        "backgroundColor": "#06C755"
+    },
+    "body": {
+        "type": "box",
+        "layout": "vertical",
+        "contents": [
+            {
+                "type": "text",
+                "text": "BDO: BDO-2026-TEST-001",
+                "size": "sm",
+                "color": "#aaaaaa"
+            },
+            {
+                "type": "text",
+                "text": "ออเดอร์: SO-2026-TEST-001",
+                "size": "sm",
+                "color": "#aaaaaa"
+            },
+            {
+                "type": "separator",
+                "margin": "lg"
+            },
+            {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "ยอดชำระ",
+                        "size": "sm",
+                        "color": "#555555"
+                    },
+                    {
+                        "type": "text",
+                        "text": "฿15,750.50",
+                        "size": "xxl",
+                        "weight": "bold",
+                        "color": "#06C755"
+                    },
+                    {
+                        "type": "text",
+                        "text": "ครบกำหนด: 2026-02-10",
+                        "size": "xs",
+                        "color": "#ff4444"
+                    }
+                ],
+                "margin": "lg"
+            },
+            {
+                "type": "separator",
+                "margin": "lg"
+            },
+            {
+                "type": "text",
+                "text": "สแกน QR Code",
+                "size": "sm",
+                "margin": "lg",
+                "align": "center"
+            },
+            {
+                "type": "image",
+                "url": "https:\/\/cny.re-ya.com\/uploads\/qr\/qr_415a43f2a6fe6e3e381f9c834ee5c71b.png",
+                "size": "full",
+                "aspectMode": "cover",
+                "aspectRatio": "1:1",
+                "margin": "md"
+            },
+            {
+                "type": "separator",
+                "margin": "lg"
+            },
+            {
+                "type": "text",
+                "text": "หรือโอนเงินเข้าบัญชี",
+                "size": "sm",
+                "margin": "lg"
+            },
+            {
+                "type": "box",
+                "layout": "vertical",
+                "contents": [
+                    {
+                        "type": "text",
+                        "text": "ธนาคารกสิกรไทย",
+                        "size": "sm",
+                        "color": "#555555"
+                    },
+                    {
+                        "type": "text",
+                        "text": "123-4-56789-0",
+                        "size": "sm",
+                        "weight": "bold"
+                    },
+                    {
+                        "type": "text",
+                        "text": "บริษัท ซีเอ็นวาย จำกัด",
+                        "size": "xs",
+                        "color": "#aaaaaa"
+                    }
+                ],
+                "margin": "md"
+            }
+        ]
+    },
+    "footer": {
+        "type": "box",
+        "layout": "vertical",
+        "contents": [
+            {
+                "type": "button",
+                "action": {
+                    "type": "uri",
+                    "label": "ดูใบแจ้งหนี้",
+                    "uri": "https:\/\/erp.cnyrxapp.com\/invoices\/INV-2026-TEST-001.pdf"
+                },
+                "style": "primary"
+            },
+            {
+                "type": "button",
+                "action": {
+                    "type": "uri",
+                    "label": "อัพโหลดสลิป",
+                    "uri": "https:\/\/liff.line.me\/YOUR_LIFF_ID"
+                },
+                "style": "secondary",
+                "margin": "sm"
+            }
+        ]
+    }
+}

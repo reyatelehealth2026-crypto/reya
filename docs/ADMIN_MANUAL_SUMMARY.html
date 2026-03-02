@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>คู่มือผู้ดูแลระบบ (ฉบับสรุป) - LINE Telepharmacy CRM</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.8;
+            color: #1f2933;
+            background: linear-gradient(135deg, #5c6bc0 0%, #3949ab 50%, #1a237e 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+
+        .container {
+            max-width: 960px;
+            margin: 0 auto 80px auto;
+            background: #ffffff;
+            box-shadow: 0 30px 60px -20px rgba(15, 23, 42, 0.45);
+            border-radius: 24px;
+            overflow: hidden;
+        }
+
+        .cover {
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 60%, #2563eb 100%);
+            color: #fff;
+            padding: 90px 70px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .cover::before,
+        .cover::after {
+            content: '';
+            position: absolute;
+            border-radius: 50%;
+            background: radial-gradient(circle at center, rgba(255,255,255,0.25), transparent 70%);
+        }
+
+        .cover::before {
+            width: 500px;
+            height: 500px;
+            top: -250px;
+            left: -150px;
+        }
+
+        .cover::after {
+            width: 600px;
+            height: 600px;
+            bottom: -300px;
+            right: -200px;
+        }
+
+        .cover h1 {
+            font-size: 3em;
+            margin-bottom: 15px;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cover .subtitle {
+            font-size: 1.35em;
+            opacity: 0.92;
+            margin-bottom: 25px;
+            font-weight: 300;
+            position: relative;
+            z-index: 1;
+        }
+
+        .cover .summary-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.12);
+            padding: 10px 18px;
+            border-radius: 999px;
+            font-weight: 500;
+            font-size: 0.95em;
+            margin: 0 8px;
+            backdrop-filter: blur(8px);
+        }
+
+        .meta-band {
+            margin-top: 45px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 24px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .meta-card {
+            min-width: 180px;
+            background: rgba(15,23,42,0.4);
+            padding: 18px 22px;
+            border-radius: 18px;
+            border: 1px solid rgba(255,255,255,0.18);
+        }
+
+        .meta-label {
+            font-size: 0.82em;
+            opacity: 0.8;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .meta-value {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-top: 6px;
+        }
+
+        .content {
+            padding: 60px 70px 80px 70px;
+        }
+
+        h2 {
+            color: #1e3a8a;
+            font-size: 2.1em;
+            margin: 55px 0 25px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            border-bottom: 3px solid #e2e8f0;
+            padding-bottom: 14px;
+        }
+
+        h2::before {
+            content: '';
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #2563eb, #0ea5e9);
+        }
+
+        h3 {
+            color: #1d4ed8;
+            font-size: 1.35em;
+            margin: 32px 0 16px;
+        }
+
+        h4 {
+            color: #334155;
+            font-size: 1.1em;
+            margin: 22px 0 10px;
+        }
+
+        p {
+            margin-bottom: 16px;
+            color: #374151;
+        }
+
+        .executive-summary {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2ff 100%);
+            border-radius: 24px;
+            padding: 32px 36px;
+            border: 1px solid #bfdbfe;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-top: 35px;
+        }
+
+        .summary-item {
+            background: white;
+            border-radius: 18px;
+            padding: 20px 22px;
+            box-shadow: 0 15px 30px -20px rgba(37, 99, 235, 0.45);
+        }
+
+        .summary-item h4 {
+            margin: 0 0 10px 0;
+            font-size: 1em;
+            color: #1d4ed8;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .toc {
+            margin-top: 45px;
+            padding: 35px 40px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-left: 6px solid #2563eb;
+        }
+
+        .toc h3 {
+            margin-top: 0;
+            color: #1e3a8a;
+        }
+
+        .toc ul {
+            list-style: none;
+            columns: 2;
+            column-gap: 40px;
+        }
+
+        .toc li {
+            margin-bottom: 14px;
+        }
+
+        .toc a {
+            text-decoration: none;
+            color: #1d4ed8;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+        }
+
+        .highlight-box {
+            background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 100%);
+            padding: 24px 28px;
+            border-radius: 18px;
+            border-left: 5px solid #4c1d95;
+            margin: 24px 0;
+        }
+
+        .highlight-box.success {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            border-left-color: #15803d;
+        }
+
+        .highlight-box.warning {
+            background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+            border-left-color: #d97706;
+        }
+
+        .highlight-box .title {
+            font-weight: 600;
+            color: #111827;
+            margin-bottom: 12px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 24px 0;
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -15px rgba(15,23,42,0.4);
+        }
+
+        thead {
+            background: linear-gradient(135deg, #0f172a, #1e3a8a);
+            color: white;
+        }
+
+        th, td {
+            padding: 16px 20px;
+            text-align: left;
+        }
+
+        tbody tr:nth-child(even) {
+            background: #f1f5f9;
+        }
+
+        tbody tr:nth-child(odd) {
+            background: #fff;
+        }
+
+        .diagram {
+            margin: 30px 0;
+            background: #0f172a;
+            border-radius: 18px;
+            padding: 24px;
+        }
+
+        .workflow-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 18px;
+            margin: 25px 0;
+        }
+
+        .workflow-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 20px;
+            background: #fff;
+            box-shadow: 0 12px 24px -18px rgba(15,23,42,0.5);
+        }
+
+        .workflow-card h4 {
+            margin-top: 0;
+            color: #2563eb;
+        }
+
+        .timeline {
+            position: relative;
+            margin: 30px 0;
+            padding-left: 30px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 12px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(180deg, #2563eb, #0ea5e9);
+            border-radius: 999px;
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 26px;
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -30px;
+            top: 6px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #fff;
+            border: 4px solid #2563eb;
+        }
+
+        .checklist {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .checklist li {
+            position: relative;
+            padding-left: 32px;
+            margin-bottom: 12px;
+        }
+
+        .checklist li::before {
+            content: '✔';
+            position: absolute;
+            left: 0;
+            color: #16a34a;
+            font-weight: 600;
+        }
+
+        .support-table td {
+            vertical-align: top;
+        }
+
+        .page-break {
+            page-break-after: always;
+        }
+
+        @media print {
+            body {
+                background: #fff;
+                padding: 0;
+            }
+            .container {
+                box-shadow: none;
+                border-radius: 0;
+                margin: 0;
+            }
+            .cover {
+                border-radius: 0;
+            }
+            .page-break {
+                page-break-after: always;
+            }
+            .toc ul {
+                columns: 2;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <section class="cover">
+            <h1>คู่มือผู้ดูแลระบบ (ฉบับสรุป)</h1>
+            <p class="subtitle">LINE Telepharmacy CRM Platform</p>
+            <div>
+                <span class="summary-chip">⚙️ Multi-Channel CRM</span>
+                <span class="summary-chip">💬 AI Inbox & Broadcast</span>
+                <span class="summary-chip">🔗 LINE OA + Odoo ERP</span>
+            </div>
+            <div class="meta-band">
+                <div class="meta-card">
+                    <div class="meta-label">เวอร์ชัน</div>
+                    <div class="meta-value">3.2</div>
+                </div>
+                <div class="meta-card">
+                    <div class="meta-label">อัปเดตล่าสุด</div>
+                    <div class="meta-value">กุมภาพันธ์ 2026</div>
+                </div>
+                <div class="meta-card">
+                    <div class="meta-label">ออกแบบเพื่อ</div>
+                    <div class="meta-value">Admin · Owner · Pharmacy Lead</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="content">
+            <h2 id="executive">Executive Snapshot</h2>
+            <p>สรุปสาระสั้น ๆ สำหรับผู้บริหาร: ระบบ LINE Telepharmacy CRM รวมศูนย์การตอบแชท, การมองเห็นข้อมูลลูกค้า, และการเชื่อมโยงบัญชี Odoo เพื่อบริหารร้านขายยาแบบครบวงจร</p>
+            <div class="executive-summary">
+                <div class="summary-item">
+                    <h4>Core Modules</h4>
+                    <p>Dashboard, Inbox, Users, Broadcast, AI, Odoo Analytics, Settings & Automation</p>
+                </div>
+                <div class="summary-item">
+                    <h4>Key Workflows</h4>
+                    <p>เข้าระบบ → ตรวจ Dashboard → ตอบแชท → สร้างออเดอร์ Odoo → สรุปยอด → ติดตามเครดิต</p>
+                </div>
+                <div class="summary-item">
+                    <h4>Integrations</h4>
+                    <p>LINE OA (Messaging API, LIFF) · Odoo ERP (API + Webhook) · Email/Telegram · AI Chat</p>
+                </div>
+                <div class="summary-item">
+                    <h4>Service Levels</h4>
+                    <p>Real-time chat, 30-min sync credit, Webhook failover, Legacy Inbox backup, Multi-account support</p>
+                </div>
+            </div>
+
+            <section class="toc">
+                <h3>สารบัญ</h3>
+                <ul>
+                    <li><a href="#architecture">01. ภาพรวมสถาปัตยกรรม & ฟีเจอร์</a></li>
+                    <li><a href="#dashboard">02. Dashboard & Analytics</a></li>
+                    <li><a href="#users">03. Users & Next.js Inbox</a></li>
+                    <li><a href="#line-odoo">04. LINE Accounts & Odoo Data</a></li>
+                    <li><a href="#settings">05. Settings, Automation & AI</a></li>
+                    <li><a href="#workflow">06. Workflow ประจำวัน</a></li>
+                    <li><a href="#troubleshooting">07. Troubleshooting & Support</a></li>
+                    <li><a href="#reference">08. Quick Reference & Appendix</a></li>
+                </ul>
+            </section>
+
+            <div class="page-break"></div>
+
+            <h2 id="architecture">01 · ภาพรวมสถาปัตยกรรม & ฟีเจอร์หลัก</h2>
+            <p>ระบบ re-ya เป็นศูนย์กลาง (hub) ที่ดึงข้อมูลจาก LINE Official Account และ Odoo ERP แล้วส่งต่อให้ทีมงานเห็นภาพเดียวกันทั้งการตลาด, การขาย, บัญชี และเภสัชกรรม</p>
+            <div class="diagram">
+                <svg viewBox="0 0 900 320" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="node" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#2563eb"></stop>
+                            <stop offset="100%" stop-color="#0ea5e9"></stop>
+                        </linearGradient>
+                        <linearGradient id="line" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.8"></stop>
+                            <stop offset="100%" stop-color="#c084fc" stop-opacity="0.8"></stop>
+                        </linearGradient>
+                    </defs>
+                    <rect x="320" y="30" width="260" height="260" rx="30" fill="url(#node)" opacity="0.15" stroke="#38bdf8" stroke-width="2"/>
+                    <text x="450" y="70" fill="#93c5fd" font-size="20" text-anchor="middle">re-ya Core Platform</text>
+                    <text x="450" y="105" fill="#e2e8f0" font-size="28" text-anchor="middle" font-weight="600">Dashboard · Inbox · Users</text>
+
+                    <rect x="360" y="130" width="180" height="140" rx="18" fill="#1d4ed8" opacity="0.9"></rect>
+                    <text x="450" y="165" fill="#bfdbfe" font-size="16" text-anchor="middle">Data Fabric</text>
+                    <text x="450" y="195" fill="#e0f2fe" font-size="24" text-anchor="middle">API + Webhook</text>
+                    <text x="450" y="225" fill="#bfdbfe" font-size="14" text-anchor="middle">SSO · Webhook Processor · Cache</text>
+
+                    <rect x="80" y="120" width="180" height="140" rx="24" fill="#10b981" opacity="0.9"></rect>
+                    <text x="170" y="165" fill="#ecfdf5" font-size="20" text-anchor="middle">LINE OA</text>
+                    <text x="170" y="195" fill="#d1fae5" font-size="16" text-anchor="middle">Messaging API · LIFF</text>
+
+                    <rect x="640" y="120" width="180" height="140" rx="24" fill="#f97316" opacity="0.9"></rect>
+                    <text x="730" y="165" fill="#fff7ed" font-size="20" text-anchor="middle">Odoo ERP</text>
+                    <text x="730" y="195" fill="#ffedd5" font-size="16" text-anchor="middle">Sales · Accounting</text>
+
+                    <line x1="260" y1="190" x2="360" y2="190" stroke="url(#line)" stroke-width="12" stroke-linecap="round" />
+                    <line x1="540" y1="190" x2="640" y2="190" stroke="url(#line)" stroke-width="12" stroke-linecap="round" />
+
+                    <text x="300" y="175" fill="#bae6fd" font-size="14" text-anchor="middle">Webhook</text>
+                    <text x="300" y="205" fill="#bae6fd" font-size="14" text-anchor="middle">Flex/Broadcast</text>
+
+                    <text x="600" y="175" fill="#fef3c7" font-size="14" text-anchor="middle">Odoo API</text>
+                    <text x="600" y="205" fill="#fef3c7" font-size="14" text-anchor="middle">Credit Sync</text>
+                </svg>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>ฟีเจอร์หลัก</th>
+                        <th>รายละเอียด</th>
+                        <th>กลุ่มผู้ใช้</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Dashboard</td>
+                        <td>แท็บ Executive/CRM/Odoo แสดงยอดขาย, กิจกรรมลูกค้า, เครดิต, KPI</td>
+                        <td>Owner · Marketing · Finance</td>
+                    </tr>
+                    <tr>
+                        <td>Next.js Inbox</td>
+                        <td>ตอบโต้แชท, Assign, Quick Reply, Tagging, Legacy fallback</td>
+                        <td>CRM Agent · Pharmacist</td>
+                    </tr>
+                    <tr>
+                        <td>Users 360°</td>
+                        <td>ผสานข้อมูล LINE + Odoo, แต้มสะสม, Tier, ประวัติสั่งซื้อ</td>
+                        <td>Admin · Sales · Accounting</td>
+                    </tr>
+                    <tr>
+                        <td>Integration Hub</td>
+                        <td>LINE OA, Odoo ERP, Telegram, Email, AI Chat</td>
+                        <td>Technical Admin</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="highlight-box">
+                <div class="title">จุดแข็งสำคัญ</div>
+                <ul class="checklist">
+                    <li>SSO เชื่อมต่อ Next.js Inbox แบบ Single Click</li>
+                    <li>Webhook Processor มี Failover & Logging แยก</li>
+                    <li>Legacy PHP Inbox standby ด้วย parameter `?legacy=1`</li>
+                    <li>เชื่อมโอเพ่นแชนแนล LINE หลายบัญชีพร้อมกัน</li>
+                </ul>
+            </div>
+
+            <h2 id="dashboard">02 · Dashboard & Analytics</h2>
+            <p>Dashboard รวมข้อมูลที่จำเป็นสำหรับทั้งผู้บริหารและทีมปฏิบัติการ โดยแบ่งเป็น 3 แท็บเพื่อการวิเคราะห์ที่ชัดเจน</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>แท็บ</th>
+                        <th>ดูอะไรได้</th>
+                        <th>Insight ที่ได้</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Executive</td>
+                        <td>ยอดขายรายวัน/เดือน/ปี, จำนวนออเดอร์, ลูกค้าใหม่, กราฟแนวโน้ม</td>
+                        <td>วัดผลงานภาพรวมธุรกิจและเทียบกับแผนรายเดือน</td>
+                    </tr>
+                    <tr>
+                        <td>CRM</td>
+                        <td>จำนวนลูกค้า, Active customer, แคมเปญที่รันอยู่, ข้อความรอตอบ</td>
+                        <td>จัดลำดับงานทีมตอบแชทและวัดคุณภาพแคมเปญ</td>
+                    </tr>
+                    <tr>
+                        <td>Odoo Overview</td>
+                        <td>จำนวนลูกค้า Odoo, ออเดอร์วันนี้/30 วัน, ยอดค้างชำระ, เครดิตคงเหลือ</td>
+                        <td>จับตาสถานะการเงินและวงเงินของลูกค้าองค์กร</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="highlight-box success">
+                <div class="title">วิธีใช้งานเร็ว</div>
+                <p>คลิกแท็บที่ต้องการ → รอโหลด 1-3 วินาที → ใช้ Hover เพื่อดูรายละเอียด → Export ภาพหน้าจอส่งผู้บริหารได้ทันที</p>
+            </div>
+
+            <div class="page-break"></div>
+
+            <h2 id="users">03 · Users & Next.js Inbox</h2>
+            <h3>Users 360°</h3>
+            <p>ฐานข้อมูลลูกค้าทั้งจาก LINE OA และ Odoo ถูกผสานในหน้าจอเดียว ค้นหาด้วยชื่อ, เบอร์, LINE ID หรือแท็กได้</p>
+            <div class="workflow-grid">
+                <div class="workflow-card">
+                    <h4>การค้นหา</h4>
+                    <p>วิธีค้น: พิมพ์คำค้น → เลือก Filter (VIP/New/Inactive) → ดูผลลัพธ์ทันที</p>
+                </div>
+                <div class="workflow-card">
+                    <h4>ข้อมูลที่เห็น</h4>
+                    <p>ข้อมูลส่วนตัว, ประวัติคำสั่งซื้อ, แต้มสะสม, Tier, ประวัติแชท</p>
+                </div>
+                <div class="workflow-card">
+                    <h4>Action ต่อเนื่อง</h4>
+                    <p>ส่งข้อความ, ติดแท็ก, เปิดประวัติ Odoo, เรียกดูเครดิตคงเหลือ</p>
+                </div>
+            </div>
+
+            <h3>Next.js Inbox</h3>
+            <p>ศูนย์กลางตอบลูกค้าแบบ Real-time รองรับการ Redirect อัตโนมัติและมีโหมด Legacy สำรอง</p>
+            <div class="highlight-box">
+                <div class="title">ฟีเจอร์เด่น</div>
+                <ul class="checklist">
+                    <li>SSO → เข้าถึงหน้า Next.js โดยไม่ต้อง Login ซ้ำ</li>
+                    <li>Quick Reply, Assign, Tag, ดูโปรไฟล์ข้างจอ</li>
+                    <li>Legacy Mode: `https://cny.re-ya.com/inbox-v2.php?legacy=1`</li>
+                    <li>Shortcut สำคัญ: Enter ส่งข้อความ, Ctrl+A Assign, Ctrl+T Tag</li>
+                </ul>
+            </div>
+
+            <h2 id="line-odoo">04 · LINE Accounts & Odoo Data</h2>
+            <h3>จัดการ LINE OA หลายบัญชี</h3>
+            <p>รองรับ Messaging API หลายบัญชีในองค์กร ต้องเตรียม Channel ID, Secret, Access Token ให้ครบ</p>
+            <div class="workflow-grid">
+                <div class="workflow-card">
+                    <h4>ขั้นตอนเพิ่มบัญชี</h4>
+                    <p>Settings → LINE Accounts → + เพิ่มบัญชี → กรอกข้อมูล → บันทึก → ทดสอบ</p>
+                </div>
+                <div class="workflow-card">
+                    <h4>Webhook URL</h4>
+                    <p>`https://cny.re-ya.com/webhook.php?account={id}` → Verify และเปิด Use Webhook</p>
+                </div>
+                <div class="workflow-card">
+                    <h4>ความปลอดภัย</h4>
+                    <p>เก็บ Secret/Tokens อย่างปลอดภัย, ใช้ HTTPS, ปิด Auto-reply ใน LINE</p>
+                </div>
+            </div>
+
+            <h3>ข้อมูลจาก Odoo</h3>
+            <p>ข้อมูลบัญชีและเครดิตจาก Odoo ถูกนำมาแสดงใน Dashboard, หน้า Users และรายงานเครดิต</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ข้อมูล</th>
+                        <th>ตำแหน่งในระบบ</th>
+                        <th>ช่องทางอัปเดต</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Sales Orders</td>
+                        <td>Odoo Dashboard / Users</td>
+                        <td>Webhook Real-time</td>
+                    </tr>
+                    <tr>
+                        <td>Payment & Residual</td>
+                        <td>Users → Odoo Tab</td>
+                        <td>Webhook + API Fallback</td>
+                    </tr>
+                    <tr>
+                        <td>Customer Credit</td>
+                        <td>Odoo Overview</td>
+                        <td>Sync ทุก 30 นาที</td>
+                    </tr>
+                    <tr>
+                        <td>Address & Profile</td>
+                        <td>User Detail</td>
+                        <td>Webhook เมื่อมีการแก้ไข</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="highlight-box warning">
+                <div class="title">Tip</div>
+                <p>หาก residual ไม่ถูกส่งมาจาก Odoo ใช้ amount_total เป็น fallback เพื่อให้ข้อมูลเครดิตยังครบ</p>
+            </div>
+
+            <div class="page-break"></div>
+
+            <h2 id="settings">05 · Settings, Automation & AI</h2>
+            <p>หน้า Settings รวมทุกการตั้งค่าตั้งแต่บัญชี, ข้อความตอบกลับ, LIFF, AI Chat, Telegram, Email/SMTP และ Consent</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>แท็บ</th>
+                        <th>ใช้สำหรับ</th>
+                        <th>ความถี่/ผู้รับผิดชอบ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>LINE Accounts</td>
+                        <td>เพิ่ม/แก้ข้อมูล Messaging API, ทดสอบการเชื่อมต่อ</td>
+                        <td>ครั้งแรก + เมื่อ Token เปลี่ยน (Admin)</td>
+                    </tr>
+                    <tr>
+                        <td>ข้อความต้อนรับ</td>
+                        <td>ตั้ง Auto-reply พร้อม Emoji/โปรโมชั่น</td>
+                        <td>อัปเดตทุกแคมเปญ (Marketing)</td>
+                    </tr>
+                    <tr>
+                        <td>LIFF & AI</td>
+                        <td>กำหนด LIFF URL, ปรับ Prompt AI</td>
+                        <td>Dev/AI Lead</td>
+                    </tr>
+                    <tr>
+                        <td>Notifications</td>
+                        <td>แจ้งเตือนข้อความใหม่, ออเดอร์, สลิป</td>
+                        <td>Admin</td>
+                    </tr>
+                    <tr>
+                        <td>Consent</td>
+                        <td>ข้อความ PDPA, บันทึกการยินยอม</td>
+                        <td>Compliance</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="highlight-box success">
+                <div class="title">แนวปฏิบัติ</div>
+                <p>บันทึกข้อความต้อนรับเป็นเทมเพลต + ใช้ Emoji เพื่อเพิ่มยอดการโต้ตอบ และตั้ง Reminder ตรวจสอบ Token ทุกไตรมาส</p>
+            </div>
+
+            <h2 id="workflow">06 · Workflow ประจำวัน</h2>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <h4>กะเช้า (เปิดร้าน)</h4>
+                    <p>Login → ตรวจ Dashboard → เช็ค Odoo Dashboard → เปิด Inbox → ทดสอบ Webhook</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>ระหว่างวัน</h4>
+                    <p>ตอบแชทภายใน 5 นาที, ตรวจ Odoo ทุก 30 นาที, อัปเดตสถานะออเดอร์, ตามสลิปการโอน</p>
+                </div>
+                <div class="timeline-item">
+                    <h4>กะดึก (ปิดร้าน)</h4>
+                    <p>สรุปยอดขายวันเดียวกัน, ส่งต่อออเดอร์ค้าง, ตอบข้อความคงค้าง, ส่งรายงานผู้จัดการ</p>
+                </div>
+            </div>
+
+            <div class="workflow-grid">
+                <div class="workflow-card">
+                    <h4>Checklists</h4>
+                    <ul class="checklist">
+                        <li>ตรวจ Inbox ทุกชั่วโมง</li>
+                        <li>ยืนยัน Webhook เดือนละครั้ง</li>
+                        <li>สำรองข้อมูลรายสัปดาห์</li>
+                    </ul>
+                </div>
+                <div class="workflow-card">
+                    <h4>Order Pipeline</h4>
+                    <p>Inbox รับคำสั่ง → ตรวจสต็อก → สร้างออเดอร์ Odoo → ส่ง Flex แจ้งโอนเงิน → ตรวจสลิป → จัดส่ง → อัปเดตสถานะ</p>
+                </div>
+                <div class="workflow-card">
+                    <h4>Broadcast Routine</h4>
+                    <p>เลือก Segment จากแท็ก → สร้างข้อความ + ภาพ → ตั้งเวลา → Monitor การส่ง & Reply</p>
+                </div>
+            </div>
+
+            <div class="page-break"></div>
+
+            <h2 id="troubleshooting">07 · Troubleshooting & Support</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>ปัญหา</th>
+                        <th>สาเหตุหลัก</th>
+                        <th>แนวทางแก้ไข</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>เข้า Inbox ไม่ได้ / หน้าขาว</td>
+                        <td>SSO Token หมดอายุ, Next.js มีปัญหา</td>
+                        <td>รีเฟรช → เปิด Legacy Mode `?legacy=1` → ติดต่อ IT ถ้ายังไม่หาย</td>
+                    </tr>
+                    <tr>
+                        <td>ไม่รับข้อความจากลูกค้า</td>
+                        <td>Webhook URL ผิด, Secret/Token ใช้ไม่ได้</td>
+                        <td>Settings → LINE Accounts → ทดสอบ → แก้ URL ให้เป็น HTTPS ที่ถูกต้อง</td>
+                    </tr>
+                    <tr>
+                        <td>ข้อมูล Odoo ไม่อัปเดต</td>
+                        <td>Webhook ล้มเหลว, API Key หมดอายุ</td>
+                        <td>ตรวจ Dashboard, ตรวจ URL `api/webhook/odoo.php`, รีเจน API Key</td>
+                    </tr>
+                    <tr>
+                        <td>ส่ง Broadcast ไม่ได้</td>
+                        <td>Token หมดอายุ, เกิน Rate Limit</td>
+                        <td>สร้าง Token ใหม่, รอ 1 ชั่วโมงแล้วลองอีกครั้ง</td>
+                    </tr>
+                    <tr>
+                        <td>หน้าโหลดช้า</td>
+                        <td>ดึงข้อมูลจำนวนมากหรือ cache ค้าง</td>
+                        <td>F12 → Network → ตรวจ slow asset, Ctrl+Shift+R, ลองเบราว์เซอร์อื่น</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="highlight-box">
+                <div class="title">ช่องทางติดต่อ</div>
+                <table class="support-table">
+                    <tbody>
+                        <tr>
+                            <td><strong>LINE / Inbox</strong></td>
+                            <td>ทีมพัฒนา · LINE: @support · dev@re-ya.com</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Odoo / บัญชี</strong></td>
+                            <td>ทีม Odoo · odoo@cny.co</td>
+                        </tr>
+                        <tr>
+                            <td><strong>บัญชีผู้ใช้</strong></td>
+                            <td>Super Admin · LINE: @admin</td>
+                        </tr>
+                        <tr>
+                            <td><strong>แจ้ง Bug</strong></td>
+                            <td>GitHub Issues: github.com/re-ya/crm/issues</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h2 id="reference">08 · Quick Reference & Appendix</h2>
+            <h3>URL สำคัญ</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>หน้า</th>
+                        <th>URL</th>
+                        <th>หมายเหตุ</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Login</td>
+                        <td>https://cny.re-ya.com/auth/login.php</td>
+                        <td>Bookmark เป็นหน้าแรก</td>
+                    </tr>
+                    <tr>
+                        <td>Dashboard</td>
+                        <td>https://cny.re-ya.com/dashboard.php</td>
+                        <td>เริ่มวันด้วย Executive แท็บ</td>
+                    </tr>
+                    <tr>
+                        <td>Users</td>
+                        <td>https://cny.re-ya.com/users.php</td>
+                        <td>ค้นข้อมูลลูกค้าทั้ง LINE + Odoo</td>
+                    </tr>
+                    <tr>
+                        <td>Inbox (Next.js)</td>
+                        <td>https://inbox.re-ya.com</td>
+                        <td>Redirect จากเมนู Inbox</td>
+                    </tr>
+                    <tr>
+                        <td>Inbox Legacy</td>
+                        <td>https://cny.re-ya.com/inbox-v2.php?legacy=1</td>
+                        <td>ใช้เมื่อ Next.js มีปัญหา</td>
+                    </tr>
+                    <tr>
+                        <td>Settings</td>
+                        <td>https://cny.re-ya.com/settings.php</td>
+                        <td>ตั้งค่าระบบทั้งหมด</td>
+                    </tr>
+                    <tr>
+                        <td>Odoo Dashboard</td>
+                        <td>https://cny.re-ya.com/odoo-dashboard.php</td>
+                        <td>ตรวจเครดิตและออเดอร์ ERP</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>คีย์ลัด (Keyboard Shortcuts)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>คีย์</th>
+                        <th>คำอธิบาย</th>
+                        <th>หน้าที่ใช้</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>F5 / Ctrl+R</td>
+                        <td>รีเฟรชหน้า</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                    <tr>
+                        <td>Ctrl+Shift+R</td>
+                        <td>ล้าง Cache + รีเฟรช</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                    <tr>
+                        <td>Ctrl+F</td>
+                        <td>ค้นหาในหน้า</td>
+                        <td>ทุกหน้า</td>
+                    </tr>
+                    <tr>
+                        <td>Ctrl+A</td>
+                        <td>Assign แชท</td>
+                        <td>Inbox</td>
+                    </tr>
+                    <tr>
+                        <td>Ctrl+T</td>
+                        <td>ติดแท็กลูกค้า</td>
+                        <td>Inbox</td>
+                    </tr>
+                    <tr>
+                        <td>Ctrl+P</td>
+                        <td>ดูโปรไฟล์ลูกค้า</td>
+                        <td>Inbox</td>
+                    </tr>
+                    <tr>
+                        <td>Enter</td>
+                        <td>ส่งข้อความ</td>
+                        <td>Inbox</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="highlight-box">
+                <div class="title">เอกสารนี้จัดทำเพื่อการพิมพ์</div>
+                <p>เมื่อเปิดไฟล์ HTML นี้ในเบราว์เซอร์ สามารถกดพิมพ์ (Ctrl+P) เพื่อบันทึกเป็น PDF โดยเค้าโครงและสีสันจะถูกปรับให้อ่านง่ายทั้งบนหน้าจอและบนกระดาษ</p>
+            </div>
+
+            <p style="margin-top:40px; color:#475569;">© 2026 CNY Telepharmacy · สรุปคู่มือผู้ดูแลระบบ (ฉบับ Hi-res PDF)</p>
+        </section>
+    </div>
+</body>
+</html>

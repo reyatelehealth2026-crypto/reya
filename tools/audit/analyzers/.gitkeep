@@ -1,0 +1,9 @@
+# This directory will contain analyzer classes
+# - EndpointInventoryScanner
+# - SchemaCompatibilityAnalyzer
+# - AuthenticationAnalyzer
+# - WebhookAnalyzer
+# - PhpBridgeValidator
+# - ConflictDetector
+# - PerformanceAnalyzer
+# - SecurityAuditor
