@@ -9,11 +9,29 @@ class InboxService
 {
     private $db;
     private $lineAccountId;
+    private $hasCustomDisplayNameColumn = null;
 
     public function __construct(PDO $db, ?int $lineAccountId = null)
     {
         $this->db = $db;
         $this->lineAccountId = $lineAccountId;
+    }
+
+    private function hasCustomDisplayNameColumn(): bool
+    {
+        if ($this->hasCustomDisplayNameColumn !== null) {
+            return $this->hasCustomDisplayNameColumn;
+        }
+
+        try {
+            $stmt = $this->db->query("SHOW COLUMNS FROM users LIKE 'custom_display_name'");
+            $this->hasCustomDisplayNameColumn = (bool) ($stmt && $stmt->rowCount() > 0);
+        } catch (Throwable $e) {
+            // Keep legacy behavior if schema introspection fails.
+            $this->hasCustomDisplayNameColumn = false;
+        }
+
+        return $this->hasCustomDisplayNameColumn;
     }
 
     /**
@@ -276,6 +294,9 @@ class InboxService
         array $filters = []
     ): array {
         $limit = max(1, min(100, $limit)); // Cap at 100
+        $displayNameExpr = $this->hasCustomDisplayNameColumn()
+            ? "COALESCE(u.custom_display_name, u.display_name)"
+            : "u.display_name";
 
         // Build query with cursor-based pagination
         // Select only necessary fields (no full message content)
@@ -296,7 +317,7 @@ class InboxService
         $sql = "
             SELECT
                 u.id,
-                COALESCE(u.custom_display_name, u.display_name) as display_name,
+                {$displayNameExpr} as display_name,
                 u.picture_url,
                 u.chat_status,
                 COALESCE(u.platform, 'line') AS platform,
@@ -326,7 +347,7 @@ class InboxService
         if ($search !== null && trim($search) !== '') {
             $searchTerm = '%' . trim($search) . '%';
             $sql .= " AND (
-                COALESCE(u.custom_display_name, u.display_name) LIKE ?
+                {$displayNameExpr} LIKE ?
                 OR EXISTS (
                     SELECT 1 FROM messages m_search
                     WHERE m_search.user_id = u.id
