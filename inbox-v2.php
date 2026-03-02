@@ -1,15 +1,14 @@
 <?php
 /**
- * Inbox V2 - SSO Redirect to Next.js Inbox
- * 
- * เดิม: Vibe Selling OS v2 (Pharmacy Edition) - PHP-based inbox
- * ใหม่: Redirect ไป Next.js Inbox ผ่าน SSO Token
- * 
+ * Inbox V2 - PHP Native Mode
+ *
+ * โหมดสำหรับเว็บไซต์ใหม่: ใช้ PHP Inbox V2 โดยตรง (ไม่ redirect SSO)
+ *
  * Flow:
  * 1. ตรวจสอบ login → ถ้ายังไม่ login → redirect ไปหน้า login PHP
- * 2. ถ้า login แล้ว → สร้าง SSO token → redirect ไป Next.js
- * 
- * Version: 3.0 (SSO Bridge)
+ * 2. ถ้า login แล้ว → โหลด PHP Inbox V2 ทันที
+ *
+ * Version: 3.1 (PHP-only)
  */
 
 // Prevent browser caching
@@ -22,51 +21,17 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// ============================================================
-// SSO REDIRECT TO NEXT.JS INBOX
-// ============================================================
-
-// Load SSO redirect helper
-require_once __DIR__ . '/auth/sso-redirect.php';
-
-// ============================================================
-// LEGACY MODE: ใช้ ?legacy=1 เพื่อเข้า PHP inbox เดิม
-// เช่น domain/inbox-v2.php?legacy=1
-// สำรองไว้กรณีระบบ Next.js มีปัญหา
-// ============================================================
-$isLegacyMode = isset($_GET['legacy']) && $_GET['legacy'] == '1';
-
-if (!$isLegacyMode) {
-    // SSO MODE: Redirect ไป Next.js Inbox
-
-    // Check if user is logged in
-    if (!isset($_SESSION['admin_user']) || empty($_SESSION['admin_user']['id'])) {
-        // Not logged in → redirect to PHP login page
-        $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
-        $host = $_SERVER['HTTP_HOST'];
-        $basePath = dirname($_SERVER['SCRIPT_NAME']);
-        $basePath = rtrim($basePath, '/');
-        $loginUrl = $basePath . '/auth/login.php';
-        header('Location: ' . $loginUrl);
-        exit;
-    }
-
-    // User is logged in → SSO redirect to Next.js inbox
-    // Pass any query parameters as redirect path
-    $redirectPath = '/dashboard';
-    if (!empty($_GET['user']) || !empty($_GET['user_id'])) {
-        // Preserve user selection if specified
-        $uid = $_GET['user'] ?? $_GET['user_id'] ?? '';
-        $redirectPath = '/dashboard?user=' . urlencode($uid);
-    }
-
-    performSSORedirect($_SESSION['admin_user'], $redirectPath);
-    // ↑ exit() is called inside performSSORedirect()
+// PHP-only mode: require login before loading inbox
+if (!isset($_SESSION['admin_user']) || empty($_SESSION['admin_user']['id'])) {
+    $basePath = dirname($_SERVER['SCRIPT_NAME']);
+    $basePath = rtrim($basePath, '/');
+    $loginUrl = $basePath . '/auth/login.php';
+    header('Location: ' . $loginUrl);
+    exit;
 }
 
 // ============================================================
-// LEGACY / FALLBACK: Original PHP Inbox Code
-// เข้าถึงได้ผ่าน ?legacy=1 เมื่อ Next.js มีปัญหา
+// PHP INBOX V2
 // ============================================================
 
 if (file_exists(__DIR__ . '/config/config.php')) {
