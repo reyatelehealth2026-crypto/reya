@@ -308,12 +308,19 @@ try {
                     throw new Exception('LINE API Error: ' . ($result['error'] ?? 'Unknown'));
                 }
 
+                // Extract quoteToken from LINE response
+                $lineQuoteToken = null;
+                if (isset($result['body']['sentMessages']) && is_array($result['body']['sentMessages']) && !empty($result['body']['sentMessages'])) {
+                    $lineQuoteToken = $result['body']['sentMessages'][0]['quoteToken'] ?? null;
+                }
+
                 echo json_encode([
                     'success'   => true,
                     'message'   => 'Message sent to LINE successfully',
                     'method'    => $result['method'] ?? 'push',
                     'line_sent' => true,
                     'platform'  => 'line',
+                    'quoteToken' => $lineQuoteToken, // Return the token to Next.js
                 ]);
             }
             break;

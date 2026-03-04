@@ -82,10 +82,13 @@ class LineAPI
         if (!is_array($messages)) {
             $messages = [['type' => 'text', 'text' => $messages]];
         }
-        return $this->sendRequest('/message/reply', [
+        $result = $this->sendRequest('/message/reply', [
             'replyToken' => $replyToken,
             'messages' => $messages
         ]);
+        
+        // V2.5: Return body directly to access sentMessages/quoteToken
+        return $result;
     }
 
     /**
@@ -96,10 +99,12 @@ class LineAPI
         if (!is_array($messages)) {
             $messages = [['type' => 'text', 'text' => $messages]];
         }
-        return $this->sendRequest('/message/push', [
+        $result = $this->sendRequest('/message/push', [
             'to' => $userId,
             'messages' => $messages
         ]);
+        
+        return $result;
     }
 
     /**
