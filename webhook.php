@@ -144,6 +144,52 @@ function logWebhookException($db, $context, Throwable $exception, $data = null)
     }
 }
 
+/**
+ * Sync message/event to Next.js inboxreya via sync webhook
+ * 
+ * @param PDO $db Database connection (for error logging)
+ * @param array $payload Event payload with 'event' and 'data' keys
+ * @return bool Success status
+ */
+function syncToNextJs(PDO $db, array $payload): bool
+{
+    if (!defined('NEXTJS_API_URL') || !NEXTJS_API_URL) {
+        return false;
+    }
+
+    $url = rtrim(NEXTJS_API_URL, '/') . '/api/sync/webhook';
+    $secret = defined('INTERNAL_API_SECRET') ? INTERNAL_API_SECRET : '';
+
+    try {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 5,
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_HTTPHEADER => [
+                'Content-Type: application/json',
+                'Authorization: Bearer ' . $secret
+            ],
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode !== 200) {
+            error_log("syncToNextJs failed: HTTP {$httpCode}, response: {$response}");
+            return false;
+        }
+
+        return true;
+    } catch (Exception $e) {
+        error_log('syncToNextJs error: ' . $e->getMessage());
+        return false;
+    }
+}
+
 $events = json_decode($body, true)['events'] ?? [];
 
 /**
@@ -985,6 +1031,26 @@ function handleMessage($event, $userId, $replyToken, $db, $line, $lineAccountId 
 
         // Get the inserted message ID for WebSocket notification
         $messageId = $db->lastInsertId();
+
+        // Sync to Next.js (inboxreya)
+        syncToNextJs($db, [
+            'event' => 'message',
+            'data' => [
+                'lineUserId' => $userId,
+                'displayName' => $user['display_name'] ?? '',
+                'pictureUrl' => $user['picture_url'] ?? null,
+                'direction' => 'incoming',
+                'type' => $messageType,
+                'content' => $messageContent,
+                'mediaUrl' => $mediaUrl ?? null,
+                'timestamp' => date('c'),
+                'lineAccountId' => $lineAccountId,
+                'lineMessageId' => $event['message']['id'] ?? null,
+                'quotedMessageId' => $event['message']['quotedMessageId'] ?? null,
+                'quoteToken' => $quoteToken ?? null,
+                'metadata' => $metadata
+            ]
+        ]);
 
         // Notify WebSocket server of new message (real-time updates)
         try {
@@ -3109,6 +3175,19 @@ function saveOutgoingMessage($db, $userId, $content, $sentBy = 'system', $messag
             // Log error but don't fail
             error_log('WebSocket notification failed for outgoing message: ' . $e->getMessage());
         }
+
+        // Sync to Next.js (inboxreya)
+        syncToNextJs($db, [
+            'event' => 'message',
+            'data' => [
+                'lineUserId' => $userId,
+                'direction' => 'outgoing',
+                'type' => $messageType,
+                'content' => $contentStr,
+                'sentBy' => $sentBy,
+                'timestamp' => date('c')
+            ]
+        ]);
 
     } catch (Exception $e) {
         logWebhookException($db, 'webhook.php', $e);
