@@ -161,10 +161,15 @@ function syncToNextJs(PDO $db, array $payload): bool
     $secret = defined('INTERNAL_API_SECRET') ? INTERNAL_API_SECRET : '';
 
     try {
+        $payloadJson = json_encode($payload, JSON_UNESCAPED_UNICODE);
+        
+        // DEBUG: Log payload being sent
+        error_log("[syncToNextJs] Sending payload: " . $payloadJson);
+        
         $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
+            CURLOPT_POSTFIELDS => $payloadJson,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 5,
             CURLOPT_CONNECTTIMEOUT => 2,
@@ -1033,7 +1038,7 @@ function handleMessage($event, $userId, $replyToken, $db, $line, $lineAccountId 
         $messageId = $db->lastInsertId();
 
         // Sync to Next.js (inboxreya)
-        syncToNextJs($db, [
+        $syncPayload = [
             'event' => 'message',
             'data' => [
                 'lineUserId' => $userId,
@@ -1050,7 +1055,13 @@ function handleMessage($event, $userId, $replyToken, $db, $line, $lineAccountId 
                 'quoteToken' => $quoteToken ?? null,
                 'metadata' => $metadata
             ]
-        ]);
+        ];
+        
+        // DEBUG: Log content before sync
+        error_log("[syncToNextJs] messageContent: " . var_export($messageContent, true));
+        error_log("[syncToNextJs] messageType: " . var_export($messageType, true));
+        
+        syncToNextJs($db, $syncPayload);
 
         // Notify WebSocket server of new message (real-time updates)
         try {
