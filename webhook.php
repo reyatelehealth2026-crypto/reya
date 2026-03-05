@@ -183,8 +183,11 @@ function syncToNextJs(PDO $db, array $payload): bool
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
+        // DEBUG: Log response
+        error_log("[syncToNextJs] HTTP {$httpCode}, response: " . substr($response, 0, 500));
+
         if ($httpCode !== 200) {
-            error_log("syncToNextJs failed: HTTP {$httpCode}, response: {$response}");
+            error_log("syncToNextJs failed: HTTP {$httpCode}");
             return false;
         }
 
